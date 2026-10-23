@@ -5,17 +5,31 @@
   "description": "ERP de gestión para Cheo: facturación, inventario, producción, cartera y control de utilidades.",
   "license": "UNLICENSED",
   "author": "Santiago Castañeda",
+  "packageManager": "npm@10.9.3",
   "engines": {
     "node": ">=22"
   },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
-    "setup": "npm --prefix backend install && npm --prefix frontend install",
-    "dev:backend": "npm --prefix backend run dev",
-    "dev:frontend": "npm --prefix frontend run dev",
-    "build": "npm --prefix backend run build && npm --prefix frontend run build",
-    "lint": "npm --prefix frontend run lint",
-    "db:migrate": "npm --prefix backend run db:migrate",
-    "db:generate": "npm --prefix backend run db:generate",
-    "db:studio": "npm --prefix backend run db:studio"
+    "setup": "npm install",
+    "dev": "turbo run dev",
+    "dev:backend": "turbo run dev --filter=./backend",
+    "dev:frontend": "turbo run dev --filter=./frontend",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:generate": "npm run db:generate -w backend",
+    "db:validate": "npm run db:validate -w backend",
+    "db:studio": "npm run db:studio -w backend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f backend"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
   }
 }

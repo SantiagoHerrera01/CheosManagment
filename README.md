@@ -9,7 +9,8 @@
 ![React](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=black)
 ![Express](https://img.shields.io/badge/express-5-000000?logo=express&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-6-2D3748?logo=prisma&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/postgresql-15%2B-4169E1?logo=postgresql&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/postgresql-17-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)
 ![Estado](https://img.shields.io/badge/estado-en%20desarrollo-orange)
 
 </div>
@@ -18,30 +19,30 @@
 
 ## 📌 Estado del proyecto
 
-> **En desarrollo activo (Fase 0–1).** El frontend cuenta con la interfaz de los módulos principales sobre datos de demostración; el backend es un esqueleto con un único endpoint. La integración completa es la siguiente gran etapa.
+> **En desarrollo activo (Fase 0–1).** El frontend tiene la interfaz de los módulos principales sobre datos de demostración; el backend es un esqueleto con un único endpoint. La integración completa es la siguiente gran etapa.
 >
-> Detalle técnico completo de lo que existe y lo que falta: **[docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md)**
+> Detalle técnico de lo que existe y lo que falta: **[docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md)**
 
 ---
 
 ## 🎯 ¿Qué resuelve?
 
-Hoy la facturación se hace **manual con talonario**: hay que cargar el talonario, el lapicero y volver a registrar cada cliente en cada venta. Cheo Manager busca ser un sistema **autónomo y de pocos clicks**, usable en campo, que cubra:
+Hoy la facturación se hace **manual con talonario**. Cheo Manager busca ser un sistema **autónomo y de pocos clicks**, usable en campo:
 
 | # | Módulo | Descripción |
 |---|--------|-------------|
-| **R1** | **Facturación** | Base de datos de clientes registrada una sola vez; al facturar basta con escribir la **cédula**. Precios parametrizados por producto/presentación y totales automáticos. |
-| **R2** | **Cartera** | Consulta de cartera por cliente, registro de **abonos parciales** y pagos completos. |
-| **R3** | **Inventario (producto terminado)** | Stock por producto, presentación y gramaje; descuento automático al facturar, ingreso por producción/compras (los obsequios también descuentan). |
-| **R4** | **Producción** | Materia prima (café en pergamino) → **trilla → tueste → empacado**, registrando mermas/rendimiento por etapa y generando producto terminado. |
-| **R5** | **Insumos y empaque** | Control de bolsas, adhesivos, posillos y material publicitario en bodega. |
-| **R6** | **Gastos** | Carga de gastos operativos de la empresa (bolsas, domicilios, insumos, etc.). |
-| **R7** | **Costos y utilidad** | Costeo interno por producto (materia prima + empaque + proceso) y cálculo de **utilidad mensual**: facturado − costo − gastos. |
-| **R8** | **Alertas y reportes** | Recordatorios de facturas por vencer/vencidas (**30 días**), alertas de stock mínimo, reporte de cartera y de inventario. |
-| **R9** | **Envío por WhatsApp** | Compartir la factura generada directo al WhatsApp del cliente. |
-| **R10** | **UX autónoma** | Interfaz simple, pocos pasos, pensada para usarse en el momento y desde el **celular**. |
+| **R1** | **Facturación** | Clientes registrados una sola vez; al facturar basta con la **cédula**. Precios parametrizados y totales automáticos. |
+| **R2** | **Cartera** | Cartera por cliente, **abonos parciales** y pagos completos. |
+| **R3** | **Inventario** | Stock por presentación/gramaje; descuento automático al facturar, ingreso por producción/compras. |
+| **R4** | **Producción** | Pergamino → **trilla → tueste → empacado** con mermas por etapa. |
+| **R5** | **Insumos** | Bolsas, adhesivos y material de empaque en bodega. |
+| **R6** | **Gastos** | Carga de gastos operativos. |
+| **R7** | **Costos y utilidad** | Costeo interno y utilidad mensual: facturado − costo − gastos. |
+| **R8** | **Alertas** | Facturas por vencer/vencidas (**30 días**), stock mínimo, reportes. |
+| **R9** | **WhatsApp** | Compartir la factura directo al cliente. |
+| **R10** | **UX** | Interfaz simple, pocos pasos y **pensada para el celular**. |
 
-> 📄 Fuente: 11 audios del cliente transcritos el 2026-10-22 → ver [docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md).
+> 📄 Fuente: 11 audios del cliente → **[docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md)**
 
 ---
 
@@ -49,11 +50,12 @@ Hoy la facturación se hace **manual con talonario**: hay que cargar el talonari
 
 | Capa | Tecnología |
 |------|-----------|
-| Frontend | **React 19** + **TypeScript** + **Vite 8** + **Tailwind CSS 4** + **react-router-dom 7** + **lucide-react** |
+| Frontend | **React 19** + **TypeScript** + **Vite 8** + **Tailwind 4** + **react-router-dom 7** |
 | Backend | **Node.js 22 LTS** + **Express 5** + **TypeScript (ESM)** |
-| Base de datos | **PostgreSQL** con **Prisma ORM 6** |
+| Base de datos | **PostgreSQL 17** con **Prisma ORM 6** |
+| Monorepo | **npm workspaces** + **Turborepo** (builds cacheados y en paralelo) |
+| Infraestructura | **Docker** + **Docker Compose** (BD y API en contenedores) |
 | Calidad | **ESLint** + **TypeScript** + **GitHub Actions (CI)** |
-| Herramientas | `tsx` (dev), `tsc` (build), Prisma Migrate |
 
 ---
 
@@ -62,35 +64,31 @@ Hoy la facturación se hace **manual con talonario**: hay que cargar el talonari
 ```
 CheosManagment/
 ├── .github/
-│   └── workflows/ci.yml         # Pipeline: typecheck + build (lint informativo)
+│   └── workflows/ci.yml         # CI: prisma validate + typecheck + build
 ├── backend/
 │   ├── prisma/
-│   │   └── schema.prisma        # Modelo de datos (Prisma + PostgreSQL)
+│   │   └── schema.prisma        # Modelo de datos
 │   ├── src/
-│   │   ├── app.ts               # Express app + rutas
+│   │   ├── app.ts               # Express app
 │   │   ├── server.ts            # Punto de entrada
 │   │   └── shared/database/     # Cliente Prisma
+│   ├── Dockerfile               # Targets: dev (hot reload) y prod
 │   ├── .env.example
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/          # UI reutilizable (módulo de ventas, sidebar…)
-│   │   ├── pages/               # Dashboard, Ventas, Clientes, Inventario…
-│   │   ├── router/              # Definición de rutas
-│   │   ├── layouts/             # MainLayout (sidebar + header)
-│   │   ├── hooks/  data/  types/
-│   │   └── assets/
+│   │   ├── components/  pages/  router/  layouts/
+│   │   ├── hooks/  data/  types/  assets/
 │   ├── .env.example
-│   └── vite.config.ts
-├── database/                    # SQL, seeds y diagramas (pendiente)
-├── docs/                        # Documentación del proyecto
-│   └── REVISION-2026-10-22.md   # Revisión técnica + requisitos del cliente
-├── assets/                      # Recursos compartidos (logos, imágenes)
+│   └── package.json
+├── compose.yaml                 # Servicios: db (PostgreSQL 17) + backend
+├── turbo.json                   # Tareas del monorepo (build, dev, lint…)
+├── .dockerignore
 ├── .editorconfig
 ├── .gitattributes
 ├── .gitignore
-├── package.json                 # Scripts raíz (dev, build, db:*)
-└── README.md
+├── package.json                 # Workspaces + scripts raíz
+└── package-lock.json            # Único lockfile del proyecto
 ```
 
 ---
@@ -102,90 +100,90 @@ CheosManagment/
 | Tool | Versión |
 |------|---------|
 | Node.js | 22 LTS o superior |
-| npm | 10+ |
-| PostgreSQL | 14+ |
+| Docker Desktop | con Docker Compose v2 |
 
-### 1. Clonar el repositorio
+### Opción A — Con Docker (recomendada)
+
+La **base de datos y el backend** corren en contenedores; el frontend en local (más rápido en Windows):
 
 ```bash
 git clone https://github.com/SantiagoHerrera01/CheosManagment.git
 cd CheosManagment
+
+npm install            # dependencias de todo el monorepo
+
+docker compose up -d   # PostgreSQL 17 + API (hot reload)
+
+npm run dev:frontend   # Vite en http://localhost:5173
 ```
 
-### 2. Backend
+### Opción B — Todo en local
 
 ```bash
-cd backend
 npm install
-cp .env.example .env        # Windows: copy .env.example .env
-# Editar .env con tus credenciales de PostgreSQL
-npm run db:migrate          # ⏳ Pendiente: aún no existe la primera migración (Fase 1)
-npm run dev                 # http://localhost:3000/api
+cp backend/.env.example backend/.env     # ajustar credenciales
+npm run dev:backend                      # API en http://localhost:3000/api
+npm run dev:frontend                     # Vite en http://localhost:5173
 ```
 
-### 3. Frontend
-
-```bash
-cd frontend
-npm install
-cp .env.example .env        # Windows: copy .env.example .env
-npm run dev                 # http://localhost:5173
-```
-
-> 💡 Desde la raíz también puedes usar `npm run dev:backend` y `npm run dev:frontend` (dos terminales).
+> 💡 La API necesita la BD corriendo: `docker compose up -d db` es suficiente si prefieres el backend en local.
 
 ---
 
-## 📜 Scripts disponibles
+## 🐳 Comandos de Docker
 
-### Raíz
+| Comando | Qué hace |
+|---------|----------|
+| `npm run docker:up` | Levanta `db` + `backend` en segundo plano |
+| `npm run docker:logs` | Sigue los logs del backend |
+| `docker compose ps` | Estado de los servicios |
+| `docker compose down` | Detiene todo (**los datos persisten**) |
+| `docker compose down -v` | Detiene y **borra** la base de datos |
+| `docker compose exec backend npm run db:migrate -w backend` | Aplica migraciones dentro del contenedor |
+| `docker compose restart backend` | Reinicia la API |
 
-| Script | Descripción |
-|--------|-------------|
-| `npm run dev:backend` | Levanta la API en modo desarrollo |
-| `npm run dev:frontend` | Levanta Vite en modo desarrollo |
-| `npm run build` | Compila backend (tsc) y frontend (tsc -b + vite build) |
-| `npm run lint` | ESLint sobre el frontend |
-| `npm run db:migrate` | Crea/aplica migraciones de Prisma |
-| `npm run db:generate` | Regenera el cliente de Prisma |
-| `npm run db:studio` | Abre Prisma Studio (inspector de BD) |
-| `npm run setup` | Instala dependencias de backend y frontend |
+**Imagen de producción:**
 
-### `backend/`
+```bash
+docker build -f backend/Dockerfile --target prod -t cheo-api .
+docker run -p 3000:3000 -e DATABASE_URL="postgresql://..." cheo-api
+```
 
-| Script | Descripción |
-|--------|-------------|
-| `npm run dev` | `tsx watch src/server.ts` |
-| `npm run build` | Compila TypeScript a `dist/` |
-| `npm start` | Ejecuta `dist/server.js` |
+---
 
-### `frontend/`
+## 📜 Scripts del monorepo
 
 | Script | Descripción |
 |--------|-------------|
-| `npm run dev` | Servidor de desarrollo Vite |
-| `npm run build` | `tsc -b && vite build` |
-| `npm run lint` | ESLint |
-| `npm run preview` | Previsualiza el build |
+| `npm run setup` | Instala dependencias de todos los workspaces |
+| `npm run dev` | Backend + frontend en paralelo (Turborepo) |
+| `npm run dev:backend` / `dev:frontend` | Solo uno de los dos |
+| `npm run build` | Compila ambos workspaces (cacheado con Turbo) |
+| `npm run typecheck` | Verifica tipos sin generar salida |
+| `npm run lint` | ESLint (frontend) |
+| `npm run db:migrate` | Migraciones de Prisma |
+| `npm run db:generate` | Regenera el cliente Prisma |
+| `npm run db:validate` | Valida `schema.prisma` |
+| `npm run db:studio` | Prisma Studio (inspector visual de la BD) |
 
 ---
 
 ## ⚙️ Variables de entorno
 
-**`backend/.env`**
+**`backend/.env`** (la usa el backend en local):
 
 ```env
 PORT=3000
 DATABASE_URL="postgresql://postgres:password@localhost:5432/cheo_manager?schema=public"
 ```
 
-**`frontend/.env`**
+**`frontend/.env`**:
 
 ```env
 VITE_API_URL=http://localhost:3000/api
 ```
 
-> 🔒 Los archivos `.env` **nunca** se suben al repo (están en `.gitignore`). Solo se versionan los `.env.example`.
+> 🔒 En Docker, `compose.yaml` define su propio `DATABASE_URL` apuntando al servicio `db` y **no** usa el `.env` (dotenv no sobreescribe variables ya definidas).
 
 ---
 
@@ -193,23 +191,22 @@ VITE_API_URL=http://localhost:3000/api
 
 | Fase | Objetivo | Estado |
 |------|----------|--------|
-| **0** | Cimientos: git, README, documentación, CI | ✅ Completada |
-| **1** | Modelo de datos completo en Prisma + migración + seed | ⏳ Siguiente |
-| **2** | API: clientes, productos/precios, facturas (descuento de stock), cartera/abonos | ⬜ Pendiente |
-| **3** | Conectar el frontend (capa de servicios, proxy, eliminar mocks) y arreglar el flujo de ventas | ⬜ Pendiente |
-| **4** | Módulos nuevos: Producción con mermas, Insumos, Gastos, Costos/Utilidad, Alertas, WhatsApp | ⬜ Pendiente |
-| **5** | Calidad: `strict`, lint limpio, loading/errores, responsive móvil, tests | ⬜ Pendiente |
-
-Detalle de tareas y bugs pendientes: **[docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md)**
+| **0** | Repo profesional: README, gitignore, CI | ✅ |
+| **0.5** | Monorepo (workspaces + Turbo) y Docker (BD + API) | ✅ |
+| **1** | Modelo de datos completo + migración + seed | ⏳ Siguiente |
+| **2** | API: clientes, productos/precios, facturas, cartera/abonos | ⬜ |
+| **3** | Conectar el frontend y arreglar el flujo de ventas | ⬜ |
+| **4** | Módulos nuevos: Producción, Insumos, Gastos, Utilidad, Alertas, WhatsApp | ⬜ |
+| **5** | Calidad: `strict`, lint limpio, loading/errores, móvil, tests | ⬜ |
 
 ---
 
 ## 🧰 Calidad de código
 
-- **Typecheck:** `npm run build` (frontend pasa `tsc -b`; backend pasa `tsc --strict`).
-- **Lint:** `npm run lint` — *actualmente reporta 11 errores conocidos que se corregirán en la Fase 5*.
-- **CI:** cada *push* y *pull request* a `main` ejecuta typecheck y build en [GitHub Actions](.github/workflows/ci.yml). El lint corre de forma **informativa** hasta cerrar la deuda técnica.
-- **Formato:** [`.editorconfig`](.editorconfig) + [` .gitattributes`](.gitattributes) garantizan UTF-8, LF y sangría de 2 espacios en todos los editores.
+- **Monorepo:** `npm run build` / `typecheck` / `lint` corren en todos los workspaces con caché de Turborepo.
+- **Lint:** actualmente reporta **11 errores conocidos** (se corrigen en la Fase 5).
+- **CI:** cada *push* y PR a `main` ejecuta `prisma validate` + typecheck + build en [GitHub Actions](.github/workflows/ci.yml). El lint corre **informativo** hasta cerrar la deuda técnica.
+- **Formato:** [`.editorconfig`](.editorconfig) + [`.gitattributes`](.gitattributes) → UTF-8, LF, sangría de 2 espacios.
 
 ---
 
@@ -217,7 +214,7 @@ Detalle de tareas y bugs pendientes: **[docs/REVISION-2026-10-22.md](docs/REVISI
 
 | Documento | Contenido |
 |-----------|-----------|
-| [docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md) | Revisión técnica completa, requisitos del cliente (R1–R10), bugs pendientes y plan de ataque |
+| [docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md) | Revisión técnica, requisitos del cliente (R1–R10), bugs pendientes y plan de ataque |
 
 ---
 
@@ -231,11 +228,11 @@ Detalle de tareas y bugs pendientes: **[docs/REVISION-2026-10-22.md](docs/REVISI
 
 ## 🔒 Seguridad
 
-Los archivos `.env` (credenciales, base de datos) **nunca** se versionan: solo se suben los `.env.example`.
+Los archivos `.env` (credenciales, base de datos) **nunca** se versionan: solo se suben los `.env.example`, y `.dockerignore` impide que entren en las imágenes.
 
 ---
 
 ## 📝 Licencia
 
 **Todos los derechos reservados.** © 2026 Santiago Castañeda.
-Este es un proyecto privado desarrollado para Cheo; no se otorga licencia pública de uso, copia o distribución.
+Proyecto privado desarrollado para Cheo; sin licencia pública de uso, copia o distribución.

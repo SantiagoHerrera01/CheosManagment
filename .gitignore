@@ -16,6 +16,9 @@ out/
 .cache/
 *.tsbuildinfo
 
+# ---- Turborepo ----
+.turbo/
+
 # ---- Variables de entorno (siempre versionar solo el .env.example) ----
 .env
 .env.*

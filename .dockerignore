@@ -1,0 +1,32 @@
+# Contexto de build = raíz del monorepo.
+# Todo lo que no necesita el backend para compilarse se excluye
+# para que el build sea rápido y no se filtren secretos.
+
+# Dependencias y builds del anfitrión
+**/node_modules
+**/dist
+**/build
+**/.cache
+
+# Secretos: jamás dentro de una imagen
+**/.env
+**/.env.*
+!**/.env.example
+
+# Repositorio y documentación
+.git
+.github
+docs
+assets
+*.md
+
+# Frontend completo (solo se necesita su package.json, ya copiado en el Dockerfile)
+frontend/src
+frontend/public
+frontend/node_modules
+frontend/dist
+
+# Logs y temporales
+**/*.log
+**/*.tmp
+**/.DS_Store

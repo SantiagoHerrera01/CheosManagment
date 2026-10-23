@@ -11,14 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend · typecheck + prisma + build
+  ci:
+    name: Prisma + typecheck + build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     env:
-      # Dummy para que Prisma pueda validar el schema en CI (no se conecta a la BD)
+      TURBO_TELEMETRY_DISABLED: "1"
+      # Dummy: Prisma debe resolver DATABASE_URL en CI (no se conecta a la BD)
       DATABASE_URL: postgresql://postgres:password@localhost:5432/cheo_manager?schema=public
     steps:
       - name: Checkout
@@ -29,45 +27,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias del monorepo
         run: npm ci
 
       - name: Validar schema de Prisma
-        run: npx prisma validate
-
-      - name: Generar cliente de Prisma
-        run: npx prisma generate
-
-      - name: Compilar TypeScript
-        run: npm run build
-
-  frontend:
-    name: Frontend · lint + typecheck + build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Instalar dependencias
-        run: npm ci
+        run: npm run db:validate
 
       # Informativo hasta cerrar la deuda técnica (11 errores conocidos, Fase 5).
-      # Cuando `npm run lint` pase limpio, quitar `continue-on-error`.
+      # Cuando `lint` pase limpio, quitar `continue-on-error`.
       - name: ESLint (informativo)
-        run: npm run lint
+        run: npx turbo run lint --output-logs=errors-only
         continue-on-error: true
 
       - name: Typecheck + build
-        run: npm run build
+        run: npx turbo run typecheck build --output-logs=full
