@@ -62,9 +62,7 @@ Hoy la facturación se hace **manual con talonario**: hay que cargar el talonari
 ```
 CheosManagment/
 ├── .github/
-│   ├── ISSUE_TEMPLATE/          # Plantillas de bug y feature
-│   ├── workflows/ci.yml         # Pipeline: typecheck + build (lint informativo)
-│   └── PULL_REQUEST_TEMPLATE.md
+│   └── workflows/ci.yml         # Pipeline: typecheck + build (lint informativo)
 ├── backend/
 │   ├── prisma/
 │   │   └── schema.prisma        # Modelo de datos (Prisma + PostgreSQL)
@@ -91,9 +89,8 @@ CheosManagment/
 ├── .editorconfig
 ├── .gitattributes
 ├── .gitignore
-├── CONTRIBUTING.md
-├── SECURITY.md
-└── CHANGELOG.md
+├── package.json                 # Scripts raíz (dev, build, db:*)
+└── README.md
 ```
 
 ---
@@ -221,25 +218,20 @@ Detalle de tareas y bugs pendientes: **[docs/REVISION-2026-10-22.md](docs/REVISI
 | Documento | Contenido |
 |-----------|-----------|
 | [docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md) | Revisión técnica completa, requisitos del cliente (R1–R10), bugs pendientes y plan de ataque |
-| [CHANGELOG.md](CHANGELOG.md) | Historial de cambios por versión |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Flujo de trabajo, convenciones de commits y ramas |
-| [SECURITY.md](SECURITY.md) | Cómo reportar vulnerabilidades |
 
 ---
 
 ## 🤝 Contribuir
 
-Lee [CONTRIBUTING.md](CONTRIBUTING.md). Resumen:
-
 1. Crea una rama: `git checkout -b feature/nombre-cambio`
-2. Cambios pequeños y enfocados, con typecheck y lint en verde
-3. Abre un *Pull Request* usando la plantilla
+2. Cambios pequeños y enfocados, con build y lint en verde
+3. Abre un *Pull Request* explicando **qué cambia** y **por qué**
 
 ---
 
 ## 🔒 Seguridad
 
-No reportes vulnerabilidades en issues públicos → revisa [SECURITY.md](SECURITY.md).
+Los archivos `.env` (credenciales, base de datos) **nunca** se versionan: solo se suben los `.env.example`.
 
 ---
 

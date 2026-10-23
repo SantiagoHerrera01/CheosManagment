@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: 📄 Documentación del proyecto
-    url: https://github.com/SantiagoHerrera01/CheosManagment/blob/main/docs/REVISION-2026-10-22.md
-    about: Revisión técnica y requisitos del cliente antes de abrir un issue.
-  - name: 🔒 Reportar una vulnerabilidad
-    url: https://github.com/SantiagoHerrera01/CheosManagment/blob/main/SECURITY.md
-    about: No abras un issue público para reportar problemas de seguridad.
