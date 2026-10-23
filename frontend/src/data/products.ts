@@ -1,0 +1,48 @@
+import type { Product } from "../types/product";
+
+export const products: Product[] = [
+  {
+    id: 1,
+    name: "Castillo",
+    process: "Suave lavado",
+    presentation: "250 g",
+    grind: "Molido",
+    price: 0,
+    stock: 25,
+    image: "",
+    active: true,
+  },
+  {
+    id: 2,
+    name: "Castillo",
+    process: "Suave lavado",
+    presentation: "250 g",
+    grind: "Grano",
+    price: 0,
+    stock: 18,
+    image: "",
+    active: true,
+  },
+  {
+    id: 3,
+    name: "Papayo Honey",
+    process: "Honey",
+    presentation: "250 g",
+    grind: "Molido",
+    price: 0,
+    stock: 12,
+    image: "",
+    active: true,
+  },
+  {
+    id: 4,
+    name: "Chiroso Urrao",
+    process: "Exótico",
+    presentation: "250 g",
+    grind: "Grano",
+    price: 0,
+    stock: 8,
+    image: "",
+    active: true,
+  },
+];
