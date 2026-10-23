@@ -19,7 +19,10 @@
 
 ## 📌 Estado del proyecto
 
-> **En desarrollo activo (Fase 0–1).** El frontend tiene la interfaz de los módulos principales sobre datos de demostración; el backend es un esqueleto con un único endpoint. La integración completa es la siguiente gran etapa.
+> **En desarrollo activo (Fase 1–2).** El backend ya tiene **autenticación con roles** y el
+> **módulo de facturación** (clientes, productos/precios, facturas, cartera/abonos e
+> inventario). El frontend todavía corre sobre datos de demostración: conectarlo es la
+> siguiente etapa.
 >
 > Detalle técnico de lo que existe y lo que falta: **[docs/REVISION-2026-10-22.md](docs/REVISION-2026-10-22.md)**
 
@@ -55,6 +58,7 @@ Hoy la facturación se hace **manual con talonario**. Cheo Manager busca ser un 
 | Base de datos | **PostgreSQL 17** con **Prisma ORM 6** |
 | Monorepo | **npm workspaces** + **Turborepo** (builds cacheados y en paralelo) |
 | Infraestructura | **Docker** + **Docker Compose** (BD y API en contenedores) |
+| API | **OpenAPI 3.0** + **Swagger UI** en `/api/docs` |
 | Calidad | **ESLint** + **TypeScript** + **GitHub Actions (CI)** |
 
 ---
@@ -67,11 +71,19 @@ CheosManagment/
 │   └── workflows/ci.yml         # CI: prisma validate + typecheck + build
 ├── backend/
 │   ├── prisma/
-│   │   └── schema.prisma        # Modelo de datos
+│   │   ├── migrations/          # Migraciones aplicadas
+│   │   ├── schema.prisma        # Modelo de datos
+│   │   └── seed.ts              # Usuarios iniciales + catálogo base
+│   ├── scripts/
+│   │   └── import-clients.ts    # Importa clientes desde JSON
 │   ├── src/
-│   │   ├── app.ts               # Express app
-│   │   ├── server.ts            # Punto de entrada
-│   │   └── shared/database/     # Cliente Prisma
+│   │   ├── config/env.ts        # Variables de entorno validadas
+│   │   ├── docs/swagger.ts      # Especificación OpenAPI
+│   │   ├── modules/             # auth, users, clients, products, invoices, inventory
+│   │   ├── shared/              # middlewares, utilidades y cliente Prisma
+│   │   ├── types/               # Augmentación de tipos de Express
+│   │   ├── app.ts               # Express app + rutas documentadas (@openapi)
+│   │   └── server.ts            # Punto de entrada
 │   ├── Dockerfile               # Targets: dev (hot reload) y prod
 │   ├── .env.example
 │   └── package.json
@@ -102,52 +114,213 @@ CheosManagment/
 | Node.js | 22 LTS o superior |
 | Docker Desktop | con Docker Compose v2 |
 
-### Opción A — Con Docker (recomendada)
-
-La **base de datos y el backend** corren en contenedores; el frontend en local (más rápido en Windows):
+### 3 comandos y queda corriendo
 
 ```bash
-git clone https://github.com/SantiagoHerrera01/CheosManagment.git
-cd CheosManagment
-
-npm install            # dependencias de todo el monorepo
-
-docker compose up -d   # PostgreSQL 17 + API (hot reload)
-
-npm run dev:frontend   # Vite en http://localhost:5173
+npm install                  # 1. dependencias de todo el monorepo
+docker compose up -d --build # 2. PostgreSQL 17 + API con hot reload
+npm run dev:frontend         # 3. Vite → http://localhost:5173
 ```
 
-### Opción B — Todo en local
+| Verificar | URL |
+|-----------|-----|
+| API | <http://localhost:3000/api> |
+| **Swagger UI** | <http://localhost:3000/api/docs> |
+| Frontend | <http://localhost:5173> |
 
-```bash
-npm install
-cp backend/.env.example backend/.env     # ajustar credenciales
-npm run dev:backend                      # API en http://localhost:3000/api
-npm run dev:frontend                     # Vite en http://localhost:5173
-```
-
-> 💡 La API necesita la BD corriendo: `docker compose up -d db` es suficiente si prefieres el backend en local.
+> 📖 Comandos completos, migraciones, problemas comunes y modo producción →
+> [🐳 Levantar el proyecto con Docker](#-levantar-el-proyecto-con-docker)
 
 ---
 
-## 🐳 Comandos de Docker
+## 🐳 Levantar el proyecto con Docker
+
+Docker levanta **la base de datos y el backend**. El frontend corre en local
+(Vite sobre bind mounts en Windows se siente lento, por eso queda fuera).
+
+| Servicio | Contenedor | Puerto | Qué hace |
+|----------|-----------|--------|----------|
+| `db` | ✅ `cheo-db` | `5432` | PostgreSQL 17 con volumen persistente (`pgdata`) |
+| `backend` | ✅ `cheo-api` | `3000` | API Express con **hot reload** (`tsx watch`) |
+| `frontend` | ❌ local | `5173` | Vite corriendo en tu máquina con `npm run dev:frontend` |
+
+### Primer arranque (paso a paso)
+
+```bash
+# 1. Clonar e instalar las dependencias del monorepo
+git clone https://github.com/SantiagoHerrera01/CheosManagment.git
+cd CheosManagment
+npm install
+
+# 2. Levantar PostgreSQL + API (la primera vez descarga las imágenes: ~1 min)
+docker compose up -d --build
+
+# 3. Confirmar que ambos servicios estén arriba
+docker compose ps
+#   cheo-db    → (healthy)
+#   cheo-api   → Up
+
+# 4. Levantar el frontend en local
+npm run dev:frontend          # → http://localhost:5173
+```
+
+**Verificar que todo funciona:**
+
+```bash
+curl http://localhost:3000/api              # {"name":"Cheo Manager API",...}
+open http://localhost:3000/api/docs         # Swagger UI
+```
+
+> 💡 No necesitas crear el `.env` para usar Docker: `compose.yaml` define su propio
+> `DATABASE_URL` apuntando al servicio `db`. El `.env` solo se usa si corres el
+> backend en local (Opción B).
+
+### Comandos disponibles
 
 | Comando | Qué hace |
 |---------|----------|
-| `npm run docker:up` | Levanta `db` + `backend` en segundo plano |
-| `npm run docker:logs` | Sigue los logs del backend |
-| `docker compose ps` | Estado de los servicios |
-| `docker compose down` | Detiene todo (**los datos persisten**) |
-| `docker compose down -v` | Detiene y **borra** la base de datos |
-| `docker compose exec backend npm run db:migrate -w backend` | Aplica migraciones dentro del contenedor |
-| `docker compose restart backend` | Reinicia la API |
+| `npm run docker:up` | `docker compose up -d` → levanta `db` + `backend` en segundo plano |
+| `docker compose up -d --build` | Igual, **reconstruyendo** la imagen del backend (útil tras cambiar dependencias o el Dockerfile) |
+| `npm run docker:logs` | Sigue en vivo los logs del backend |
+| `docker compose logs -f db` | Sigue los logs de PostgreSQL |
+| `docker compose ps` | Estado y puertos de los servicios |
+| `docker compose restart backend` | Reinicia solo la API |
+| `docker compose restart db` | Reinicia solo la base de datos |
+| `docker compose down` | Detiene todo. **Los datos persisten** |
+| `docker compose down -v` | Detiene y **borra** los volúmenes (⚠️ borra la BD) |
+| `docker compose exec db psql -U cheo -d cheo_manager` | Consola `psql` dentro de la BD |
+| `docker compose exec backend npm run db:migrate -w backend` | Aplica migraciones de Prisma |
+| `docker compose exec backend npm run db:studio -w backend` | Prisma Studio en `http://localhost:5555` |
+| `docker compose exec backend bash` | Shell dentro del contenedor del backend |
+| `npm run build -- --force` | Reconstruye apps ignorando la caché de Turborepo |
 
-**Imagen de producción:**
+### Frontend en local (mientras Docker corre el backend)
 
 ```bash
-docker build -f backend/Dockerfile --target prod -t cheo-api .
-docker run -p 3000:3000 -e DATABASE_URL="postgresql://..." cheo-api
+npm run dev:frontend     # Vite → http://localhost:5173
 ```
+
+El frontend usa `frontend/.env` (`VITE_API_URL=http://localhost:3000/api`).
+
+### Opción B — Sin Docker para la API
+
+```bash
+npm install
+cp backend/.env.example backend/.env     # ajustar credenciales de Postgres
+npm run dev:backend                      # API en http://localhost:3000/api
+```
+
+Si solo quieres la BD en contenedor: `docker compose up -d db`.
+
+### Problemas comunes
+
+| Síntoma | Causa probable | Solución |
+|---------|----------------|----------|
+| `ECONNREFUSED` al consultar la BD | El backend corre en local pero la BD no | `docker compose up -d db` |
+| Puerto `3000` o `5432` ocupado | Otro proceso usando el puerto | Cambia `PORT` en `compose.yaml` o para el proceso |
+| La API no detecta cambios | `tsx watch` se frenó tras un error | `docker compose restart backend` |
+| Error tras instalar dependencias nuevas | El `node_modules` del contenedor está desactualizado | `docker compose exec backend npm install` y luego `docker compose restart backend` |
+| Quieres empezar de cero | Volumen sucio | `docker compose down -v` ⚠️ **borra los datos** |
+
+### Imagen de producción
+
+```bash
+# Compilar la imagen optimizada (multi-stage, sin dependencias de desarrollo)
+docker build -f backend/Dockerfile --target prod -t cheo-api .
+
+# Ejecutarla apuntando a una base de datos externa
+docker run -p 3000:3000 \
+  -e DATABASE_URL="postgresql://usuario:clave@host:5432/cheo_manager" \
+  cheo-api
+```
+
+---
+
+## 📖 Documentación de la API (Swagger)
+
+| Recurso | URL |
+|---------|-----|
+| **Swagger UI** (interactiva, con botón *Try it out*) | http://localhost:3000/api/docs |
+| Especificación OpenAPI 3.0 en JSON | http://localhost:3000/api/openapi.json |
+
+- Cada endpoint se documenta con anotaciones `@openapi` encima de la ruta en
+  [`backend/src/app.ts`](backend/src/app.ts) y en los routers de `backend/src/modules/`.
+- El JSON se puede importar directo en **Postman** o **Insomnia** (habilita *Cookies*:
+  la sesión viaja en cookies `HttpOnly`, no en el body).
+- Las etiquetas (`tags`) de los módulos están declaradas en
+  [`backend/src/docs/swagger.ts`](backend/src/docs/swagger.ts).
+
+---
+
+## 🔑 Autenticación y roles
+
+El backend exige sesión en todos los módulos de negocio. La sesión se maneja con
+**cookies `HttpOnly` + `SameSite=Strict`** (access token de 15 min y refresh token
+rotativo de 7 días), de forma que **nada es accesible desde JavaScript** y se mitiga CSRF.
+
+### Roles
+
+| Rol | Puede |
+|-----|-------|
+| **ADMIN** | Todo: usuarios, catálogo, costos, anular facturas pagadas |
+| **VENDEDOR** | Facturar, gestionar clientes, registrar abonos, anular facturas pendientes |
+| **BODEGA** | Entradas de stock, movimientos de inventario |
+| **CONTADOR** | Solo lectura de facturas, clientes y reportes (ve costos) |
+
+> El costo interno de producción (`cost`) **nunca** se envía a VENDEDOR ni a BODEGA.
+
+### Endpoints principales
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/auth/login` | Inicia sesión (emite las cookies) |
+| `POST` | `/api/auth/refresh` | Rota el refresh token y renueva la sesión |
+| `POST` | `/api/auth/logout` | Cierra la sesión |
+| `GET` | `/api/auth/me` | Usuario autenticado |
+| `POST` | `/api/auth/change-password` | Cambia la contraseña propia |
+| `GET/POST/PATCH` | `/api/users` | Gestión de usuarios (solo ADMIN) |
+| `GET/POST/PATCH` | `/api/clients` | Clientes con saldo de cartera |
+| `GET/POST/PATCH` | `/api/products` | Catálogo, presentaciones y precios |
+| `GET/POST` | `/api/invoices` | Crear y consultar facturas |
+| `POST` | `/api/invoices/:id/payments` | Registrar abonos (cartera) |
+| `POST` | `/api/invoices/:id/void` | Anular factura (devuelve stock) |
+| `GET` | `/api/invoices/overdue` | Facturas vencidas/por vencer (alertas) |
+| `GET` | `/api/inventory/movements` | Historial de movimientos de stock |
+
+### Usuarios de desarrollo (seed)
+
+```bash
+npm run db:seed -w backend   # crea usuarios, cliente "Consumidor Final" y catálogo base
+```
+
+| Rol | Correo | Contraseña |
+|-----|--------|------------|
+| ADMIN | `admin@cheo.com` | `CheoAdmin2026!` |
+| VENDEDOR | `vendedor@cheo.com` | `CheoVende2026!` |
+
+> ⚠️ Son credenciales **de desarrollo**. En producción se crean usuarios reales desde
+> el panel de administración y se cambian estas contraseñas.
+
+### Seguridad implementada
+
+- Contraseñas con **Argon2id** (64 MB, 3 iteraciones — recomendación OWASP).
+- Bloqueo de cuenta tras **5 intentos fallidos** (15 min) + límite de peticiones por IP.
+- Refresh tokens guardados **hasheados** en BD, con **rotación** y detección de reutilización.
+- Cabeceras de seguridad con **Helmet**, CORS restringido a los orígenes configurados
+  y verificación de `Origin` en peticiones que modifican datos.
+- Validación de entrada con **Zod** en todos los endpoints.
+- Precios y stock se calculan **siempre en el servidor** (nunca se confía en el cliente).
+
+### Importar clientes desde un Excel
+
+Si el cliente tiene una base existente en Excel, se convierte a JSON y se importa:
+
+```bash
+npm run import:clients -w backend -- ./clientes.json
+```
+
+El importador es **idempotente** (hace *upsert* por cédula/NIT) y reporta los
+registros inválidos sin abortar el resto.
 
 ---
 
@@ -164,7 +337,12 @@ docker run -p 3000:3000 -e DATABASE_URL="postgresql://..." cheo-api
 | `npm run db:migrate` | Migraciones de Prisma |
 | `npm run db:generate` | Regenera el cliente Prisma |
 | `npm run db:validate` | Valida `schema.prisma` |
+| `npm run db:seed` | Crea usuarios iniciales, cliente por defecto y catálogo base |
+| `npm run import:clients` | Importa clientes desde un JSON (`-- ./clientes.json`) |
 | `npm run db:studio` | Prisma Studio (inspector visual de la BD) |
+| `npm run docker:up` | `docker compose up -d` → BD + API (ver [🐳 Docker](#-levantar-el-proyecto-con-docker)) |
+| `npm run docker:down` | Detiene los contenedores (los datos persisten) |
+| `npm run docker:logs` | Sigue los logs del backend en vivo |
 
 ---
 
@@ -174,7 +352,20 @@ docker run -p 3000:3000 -e DATABASE_URL="postgresql://..." cheo-api
 
 ```env
 PORT=3000
-DATABASE_URL="postgresql://postgres:password@localhost:5432/cheo_manager?schema=public"
+DATABASE_URL="postgresql://cheo:cheo_dev_password@localhost:5432/cheo_manager?schema=public"
+
+# Seguridad — obligatorios en producción (mínimo 32 caracteres).
+# En desarrollo se generan valores locales de respaldo con advertencia.
+JWT_ACCESS_SECRET=
+JWT_REFRESH_SECRET=
+
+CORS_ORIGINS=http://localhost:5173
+```
+
+Genera los secretos con:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 **`frontend/.env`**:
@@ -192,10 +383,11 @@ VITE_API_URL=http://localhost:3000/api
 | Fase | Objetivo | Estado |
 |------|----------|--------|
 | **0** | Repo profesional: README, gitignore, CI | ✅ |
-| **0.5** | Monorepo (workspaces + Turbo) y Docker (BD + API) | ✅ |
-| **1** | Modelo de datos completo + migración + seed | ⏳ Siguiente |
-| **2** | API: clientes, productos/precios, facturas, cartera/abonos | ⬜ |
-| **3** | Conectar el frontend y arreglar el flujo de ventas | ⬜ |
+| **0.5** | Monorepo (workspaces + Turbo), Docker (BD + API) y Swagger en `/api/docs` | ✅ |
+| **1** | Modelo de datos completo + migraciones + seed | ✅ |
+| **1.5** | Autenticación (login, cookies, refresh rotativo) + usuarios y roles | ✅ |
+| **2** | API: clientes, productos/precios, facturas, cartera/abonos, inventario | ✅ |
+| **3** | Conectar el frontend y arreglar el flujo de ventas | ⏳ Siguiente |
 | **4** | Módulos nuevos: Producción, Insumos, Gastos, Utilidad, Alertas, WhatsApp | ⬜ |
 | **5** | Calidad: `strict`, lint limpio, loading/errores, móvil, tests | ⬜ |
 

@@ -7,35 +7,260 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Client {
-  id                String   @id @default(uuid())
+// ============================================================
+//  SEGURIDAD · usuarios y sesiones
+// ============================================================
 
-  documentType      DocumentType
-  documentNumber    String   @unique
-
-  fullName          String
-
-  phone             String
-
-  email             String?
-
-  address           String?
-
-  city              String?
-
-  department        String?
-
-  notes             String?
-
-  isActive          Boolean  @default(true)
-
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+enum Role {
+  ADMIN
+  VENDEDOR
+  BODEGA
+  CONTADOR
 }
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  fullName     String
+  passwordHash String
+  role         Role      @default(VENDEDOR)
+  isActive     Boolean   @default(true)
+
+  // Protección contra fuerza bruta
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  refreshTokens RefreshToken[]
+  invoices      Invoice[]           @relation("InvoiceCreatedBy")
+  payments      Payment[]           @relation("PaymentCreatedBy")
+  movements     InventoryMovement[] @relation("MovementCreatedBy")
+}
+
+/// Refresh tokens guardados hasheados (SHA-256): robar la BD no da sesiones vivas.
+/// `replacedById` permite detectar reutilización de un token ya rotado.
+model RefreshToken {
+  id           String    @id @default(uuid())
+  tokenHash    String    @unique
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ============================================================
+//  CLIENTES (R1)
+// ============================================================
 
 enum DocumentType {
   CC
   NIT
   CE
   PASSPORT
+}
+
+model Client {
+  id             String       @id @default(uuid())
+  documentType   DocumentType
+  documentNumber String       @unique
+  fullName       String
+  /// Puede faltar: la base original del cliente tiene registros sin celular.
+  phone          String?
+  email          String?
+  address        String?
+  city           String?
+  department     String?
+  notes          String?
+  creditLimit    Decimal?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  invoices Invoice[]
+}
+
+// ============================================================
+//  CATÁLOGO · productos, presentaciones y precios (R1)
+// ============================================================
+
+enum Grind {
+  MOLIDO
+  GRANO
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  variety     String? // Castillo, Chiroso Urrao, Papayo Honey…
+  process     String? // Lavado, Natural, Honey…
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  presentations ProductPresentation[]
+}
+
+/// Una variante de venta = producto + presentación + molienda.
+/// Acá vive el precio parametrizado, el costo interno (R7) y el stock (R3).
+model ProductPresentation {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  label String // "250 g", "500 g", "1 kg"
+  grind Grind
+
+  price Decimal // precio de venta parametrizado (lo paga el cliente final)
+  cost  Decimal @default(0) // costo interno de producción (NUNCA se expone al cliente)
+
+  stock        Int    @default(0)
+  minimumStock Int    @default(0) // umbral de alerta (R8)
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items     InvoiceItem[]
+  movements InventoryMovement[]
+
+  @@unique([productId, label, grind])
+  @@index([productId])
+}
+
+// ============================================================
+//  FACTURACIÓN (R1) · CARTERA Y ABONOS (R2)
+// ============================================================
+
+enum PaymentMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  CONTRA_ENTREGA
+  CREDITO
+  ABONO
+}
+
+enum InvoiceStatus {
+  PENDIENTE
+  PAGADA
+  VENCIDA
+  ANULADA
+}
+
+model Invoice {
+  id      String @id @default(uuid())
+  number  String @unique // consecutivo: F-000001
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  issueDate DateTime @default(now())
+  dueDate   DateTime // vencimiento (30 días por defecto)
+
+  subtotal Decimal @default(0)
+  discount Decimal @default(0)
+  total    Decimal @default(0)
+
+  status        InvoiceStatus @default(PENDIENTE)
+  paymentMethod PaymentMethod @default(EFECTIVO)
+  notes         String?
+
+  createdById String
+  createdBy   User   @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([issueDate])
+}
+
+model InvoiceItem {
+  id         String  @id @default(uuid())
+  invoiceId  String
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  presentationId String
+  presentation   ProductPresentation @relation(fields: [presentationId], references: [id])
+
+  // Snapshot: la factura no cambia aunque el producto se renombre o reprice
+  productName       String
+  presentationLabel String // "250 g · Molido"
+
+  quantity  Int
+  unitPrice Decimal
+  subtotal  Decimal
+
+  @@index([invoiceId])
+  @@index([presentationId])
+}
+
+/// Abonos y pagos sobre una factura (R2)
+model Payment {
+  id        String        @id @default(uuid())
+  invoiceId String
+  invoice   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount Decimal
+  method PaymentMethod
+  paidAt DateTime      @default(now())
+  notes  String?
+
+  createdById String
+  createdBy   User   @relation("PaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+// ============================================================
+//  INVENTARIO (R3) · trazabilidad de movimientos
+// ============================================================
+
+enum MovementType {
+  ENTRADA
+  SALIDA
+  AJUSTE
+}
+
+enum MovementReason {
+  VENTA
+  OBSEQUIO
+  PRODUCCION
+  COMPRA
+  DEVOLUCION
+  AJUSTE
+  MERMA
+}
+
+model InventoryMovement {
+  id             String             @id @default(uuid())
+  presentationId String
+  presentation   ProductPresentation @relation(fields: [presentationId], references: [id])
+
+  type     MovementType
+  reason   MovementReason
+  quantity Int // siempre positivo; el signo lo determina `type`
+  reference String? // nº de factura u orden de producción
+  notes    String?
+
+  createdById String
+  createdBy   User     @relation("MovementCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([presentationId])
+  @@index([createdAt])
 }

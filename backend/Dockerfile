@@ -48,10 +48,12 @@ COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
 RUN npm ci -w backend --omit=dev
 
-# Código compilado + cliente de Prisma generado
+# Código compilado + cliente de Prisma generado + fuente (la documentación
+# Swagger lee las anotaciones de los archivos .ts en tiempo de ejecución)
 COPY --from=build /app/backend/dist backend/dist
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma
 COPY backend/prisma backend/prisma
+COPY backend/src backend/src
 
 EXPOSE 3000
 CMD ["node", "backend/dist/server.js"]

@@ -23,6 +23,7 @@
     "lint": "turbo run lint",
     "db:migrate": "npm run db:migrate -w backend",
     "db:generate": "npm run db:generate -w backend",
+    "db:seed": "npm run db:seed -w backend",
     "db:validate": "npm run db:validate -w backend",
     "db:studio": "npm run db:studio -w backend",
     "docker:up": "docker compose up -d",
