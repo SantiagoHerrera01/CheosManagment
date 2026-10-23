@@ -1,0 +1,62 @@
+# ============================================================
+# Cheo Manager — .gitignore raíz
+# Cubre: Node, build, entornos, logs, SO, editores, cobertura
+# ============================================================
+
+# ---- Dependencias ----
+node_modules/
+.pnp/
+.pnp.js
+
+# ---- Builds / salidas ----
+dist/
+build/
+out/
+.vite/
+.cache/
+*.tsbuildinfo
+
+# ---- Variables de entorno (siempre versionar solo el .env.example) ----
+.env
+.env.*
+!.env.example
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---- Seguridad local / certificados ----
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---- Cobertura de tests ----
+coverage/
+.nyc_output/
+*.lcov
+
+# ---- Editors / IDEs ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# ---- SO ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Prisma (cliente generado localmente) ----
+backend/src/generated/prisma/
+
+# ---- Varios ----
+*.local
+*.tmp

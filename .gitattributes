@@ -1,0 +1,30 @@
+# Normaliza finales de línea: LF en el repo, independiente del SO
+* text=auto eol=lf
+
+# Archivos de script de Windows
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binarios
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.svg  text
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.pdf   binary
+*.zip   binary
+
+# Audio (mensajes del cliente)
+*.ogg binary
+*.mp3 binary
+*.wav binary
+
+# Docs donde el espacio final importa
+*.md text

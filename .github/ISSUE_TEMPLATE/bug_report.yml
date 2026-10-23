@@ -1,0 +1,76 @@
+name: 🐛 Reportar bug
+description: Algo no funciona como debería
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar el bug. Cuanta más información des, más rápido podremos reproducirlo.
+
+  - type: dropdown
+    id: modulo
+    attributes:
+      label: Módulo afectado
+      options:
+        - Facturación / Ventas
+        - Clientes
+        - Inventario
+        - Producción
+        - Cartera
+        - Compras
+        - Bancos
+        - Reportes / Dashboard
+        - Configuración
+        - Backend / API
+        - Instalación / Entorno
+        - Otro
+    validations:
+      required: true
+
+  - type: textarea
+    id: que-pasa
+    attributes:
+      label: ¿Qué sucede?
+      description: Describe el problema concreto.
+      placeholder: Al hacer clic en "Registrar venta" el botón se desactiva pero no se guarda nada…
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: ¿Qué esperabas?
+      placeholder: Que la venta aparezca en el listado y se descuente el inventario.
+    validations:
+      required: true
+
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducir
+      description: Numera los pasos exactos.
+      placeholder: |
+        1. Ir a /ventas
+        2. Clic en "Nueva venta"
+        3. Seleccionar cliente y producto
+        4. Clic en "Registrar venta"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: entorno
+    attributes:
+      label: Entorno
+      options:
+        - Desarrollo local (npm run dev)
+        - Build de producción
+        - GitHub Actions / CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: extras
+    attributes:
+      label: Screenshots, logs o contexto extra
+      description: Opcional pero muy útil.
