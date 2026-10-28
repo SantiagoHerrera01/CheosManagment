@@ -60,7 +60,15 @@ export const env = {
   isProduction,
 
   PORT: Number(process.env.PORT ?? 3000),
-  DATABASE_URL: databaseUrl,
+  // Fail-fast solo al arrancar la app (no al hacer build):
+  // `prisma generate` no necesita URL y no debe fallar por esto.
+  DATABASE_URL:
+    databaseUrl ||
+    (() => {
+      throw new Error(
+        "[env] No hay URL de base de datos: define DATABASE_URL (dev) o DATABASE_URL_PROD (producción)."
+      );
+    })(),
 
   /** Seguros independientes: comprometer uno no tumba el otro. */
   JWT_ACCESS_SECRET: readSecret("JWT_ACCESS_SECRET", DEV_ACCESS_SECRET),
