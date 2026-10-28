@@ -28,7 +28,8 @@ const TITLES: Record<string, string> = {
   "/bancos": "Bancos",
   "/compras": "Compras",
   "/reportes": "Reportes",
-  "/configuracion": "Configuración",
+  "/configuracion": "Mi perfil",
+  "/usuarios": "Usuarios",
 };
 
 const TODAY = new Intl.DateTimeFormat("es-CO", {

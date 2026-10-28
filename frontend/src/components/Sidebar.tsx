@@ -10,6 +10,7 @@ import {
   Receipt,
   BarChart3,
   Settings,
+  UserCog,
   Coffee,
 } from "lucide-react";
 
@@ -91,6 +92,11 @@ const menuItems: MenuItem[] = [
     name: "Configuración",
     path: "/configuracion",
     icon: Settings,
+  },
+  {
+    name: "Usuarios",
+    path: "/usuarios",
+    icon: UserCog,
     roles: [],
   },
 ];

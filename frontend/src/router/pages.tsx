@@ -14,6 +14,7 @@ export const Customers = lazy(() => import("../pages/Customers"));
 export const Reports = lazy(() => import("../pages/Reports"));
 export const Settings = lazy(() => import("../pages/Settings"));
 export const Banks = lazy(() => import("../pages/Banks"));
+export const Users = lazy(() => import("../pages/Users"));
 export const Login = lazy(() => import("../pages/Login"));
 
 /** Indicador de carga mientras se descarga el chunk de la página. */

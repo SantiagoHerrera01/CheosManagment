@@ -20,7 +20,9 @@ import {
   Reports,
   Sales,
   Settings,
+  Users,
 } from "./pages";
+import RequireRole from "./RequireRole";
 
 export const router = createBrowserRouter([
   {
@@ -146,6 +148,17 @@ export const router = createBrowserRouter([
           <LazyPage>
             <Settings />
           </LazyPage>
+        ),
+      },
+
+      {
+        path: "usuarios",
+        element: (
+          <RequireRole roles={[]}>
+            <LazyPage>
+              <Users />
+            </LazyPage>
+          </RequireRole>
         ),
       },
     ],
