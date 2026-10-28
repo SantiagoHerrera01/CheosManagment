@@ -4,6 +4,9 @@ import { paginationQuery } from "../../shared/utils/pagination.js";
 
 export const grindSchema = z.enum(["MOLIDO", "GRANO"]);
 
+/** Tipo de artículo (R5): venta, materia prima o insumo/empaque. */
+export const categorySchema = z.enum(["TERMINADO", "MATERIA_PRIMA", "INSUMO"]);
+
 export const presentationInputSchema = z.object({
   label: z.string().trim().min(1).max(30),
   grind: grindSchema,
@@ -17,6 +20,7 @@ export const createProductSchema = z.object({
   name: z.string().trim().min(2).max(120),
   variety: z.string().trim().max(80).nullish(),
   process: z.string().trim().max(80).nullish(),
+  category: categorySchema.default("TERMINADO"),
   presentations: z
     .array(presentationInputSchema)
     .min(1, "El producto debe tener al menos una presentación.")
@@ -28,6 +32,7 @@ export const updateProductSchema = z
     name: z.string().trim().min(2).max(120).optional(),
     variety: z.string().trim().max(80).nullish(),
     process: z.string().trim().max(80).nullish(),
+    category: categorySchema.optional(),
     isActive: z.boolean().optional(),
   })
   .refine((data) => Object.values(data).some((v) => v !== undefined), {
@@ -61,6 +66,7 @@ export const listProductsQuery = paginationQuery.extend({
   q: z.string().trim().max(120).optional(),
   active: z.enum(["true", "false"]).default("true"),
   lowStock: z.enum(["true", "false"]).default("false"),
+  category: categorySchema.optional(),
 });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;

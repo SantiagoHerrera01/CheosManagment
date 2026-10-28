@@ -152,6 +152,9 @@ export async function create(input: CreateInvoiceInput, userId: string) {
         quantity: item.quantity,
         unitPrice,
         subtotal: unitPrice * item.quantity,
+        // Snapshot del costo al momento de vender: sostiene la utilidad (R7)
+        // aunque el costo del producto cambie después.
+        unitCost: money(p.cost),
       };
     });
 
@@ -170,6 +173,53 @@ export async function create(input: CreateInvoiceInput, userId: string) {
     const total = Math.max(0, subtotal - input.discount);
 
     const number = await nextInvoiceNumber(tx);
+
+    // Pago inicial o pago total inmediato (se calcula antes para poder
+    // validar el límite de crédito con lo que realmente queda a deber).
+    const initialPayment = isPaidUpFront
+      ? total
+      : input.initialPayment && input.initialPayment > 0
+        ? Math.min(input.initialPayment, total)
+        : 0;
+
+    // Límite de crédito del cliente (bug 6 / R2): solo aplica a lo que
+    // queda a deber (crédito o abono). `creditLimit` en null = sin límite.
+    if (!isPaidUpFront && client.creditLimit !== null) {
+      const creditLimit = money(client.creditLimit);
+
+      const [totals, payments] = await Promise.all([
+        tx.invoice.groupBy({
+          by: ["clientId"],
+          where: { clientId: client.id, status: { not: "ANULADA" } },
+          _sum: { total: true },
+        }),
+        tx.payment.findMany({
+          where: { invoice: { clientId: client.id } },
+          select: { amount: true },
+        }),
+      ]);
+
+      const currentBalance =
+        money(totals[0]?._sum.total ?? 0) -
+        payments.reduce((sum, p) => sum + money(p.amount), 0);
+
+      const newDebt = total - initialPayment;
+
+      if (currentBalance + newDebt > creditLimit) {
+        throw ApiError.unprocessable(
+          `Límite de crédito excedido: el cliente ya debe ${money(
+            currentBalance
+          )} y esta venta agregaría ${newDebt} (límite ${creditLimit}).`,
+          [
+            {
+              path: "creditLimit",
+              message:
+                "Divide la venta, registra un abono o sube el límite de crédito del cliente.",
+            },
+          ]
+        );
+      }
+    }
 
     // Líneas de factura
     const invoice = await tx.invoice.create({
@@ -213,13 +263,7 @@ export async function create(input: CreateInvoiceInput, userId: string) {
       });
     }
 
-    // Pago inicial o pago total inmediato
-    const initialPayment = isPaidUpFront
-      ? total
-      : (input.initialPayment && input.initialPayment > 0
-          ? Math.min(input.initialPayment, total)
-          : 0);
-
+    // Pago inicial o pago total inmediato (ya calculado arriba)
     if (initialPayment > 0) {
       await tx.payment.create({
         data: {

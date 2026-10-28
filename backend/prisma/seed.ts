@@ -95,11 +95,23 @@ const catalog = [
 
 async function seedProducts() {
   for (const p of catalog) {
-    const product = await prisma.product.upsert({
-      where: { id: `seed-${p.name.toLowerCase().replace(/\s+/g, "-")}` },
-      update: { variety: p.variety, process: p.process },
-      create: {
-        id: `seed-${p.name.toLowerCase().replace(/\s+/g, "-")}`,
+    // Idempotencia por nombre (el ID lo genera Prisma como UUID).
+    const existing = await prisma.product.findFirst({
+      where: { name: p.name },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await prisma.product.update({
+        where: { id: existing.id },
+        data: { variety: p.variety, process: p.process },
+      });
+      console.log(`  ✔ Producto ${p.name} (${p.presentations.length} presentaciones)`);
+      continue;
+    }
+
+    const product = await prisma.product.create({
+      data: {
         name: p.name,
         variety: p.variety,
         process: p.process,

@@ -49,6 +49,8 @@ const options: swaggerJsdoc.Options = {
       { name: "Inventario", description: "R3 · Movimientos de stock de producto terminado" },
       { name: "Producción", description: "R4 · Órdenes, etapas (trilla/tueste) y mermas" },
       { name: "Gastos", description: "R6 · Carga de gastos operativos" },
+      { name: "Compras", description: "R5 · Compras a proveedor con entrada a bodega" },
+      { name: "Bancos", description: "Cuentas y movimientos (solo contador)" },
       { name: "Reportes", description: "R7/R8 · Utilidad, alertas e inventario" },
     ],
     components: {
@@ -117,6 +119,31 @@ const options: swaggerJsdoc.Options = {
           enum: ["EFECTIVO", "TRANSFERENCIA", "CONTRA_ENTREGA", "CREDITO", "ABONO"],
           description:
             "EFECTIVO/TRANSFERENCIA/CONTRA_ENTREGA dejan la factura PAGADA. CREDITO la deja PENDIENTE a `creditDays` (30 por defecto). ABONO registra un abono inicial.",
+        },
+        GastoInput: {
+          type: "object",
+          required: ["concept", "amount"],
+          properties: {
+            date: { type: "string", format: "date", description: "Hoy por defecto" },
+            concept: { type: "string", example: "Bolsas 250 g" },
+            amount: { type: "number", example: 45000 },
+            category: {
+              type: "string",
+              enum: [
+                "Operativo",
+                "Nómina",
+                "Arriendo",
+                "Servicios públicos",
+                "Transporte",
+                "Empaque",
+                "Mantenimiento",
+                "Impuestos",
+                "Otro",
+              ],
+              default: "Operativo",
+            },
+            notes: { type: "string", nullable: true },
+          },
         },
         EstadoFactura: {
           type: "string",

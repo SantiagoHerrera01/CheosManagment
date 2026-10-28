@@ -43,6 +43,7 @@ export function serializeProduct(
     name: product.name,
     variety: product.variety,
     process: product.process,
+    category: product.category,
     isActive: product.isActive,
     presentations: product.presentations.map((p) =>
       serializePresentation(p, includeCost)
@@ -57,6 +58,7 @@ const productInclude = { presentations: { orderBy: { label: "asc" as const } } }
 export async function list(pagination: Pagination, query: ListProductsQuery, role: Role) {
   const where: Prisma.ProductWhereInput = {
     ...(query.active === "true" ? { isActive: true } : {}),
+    ...(query.category ? { category: query.category } : {}),
     ...(query.q
       ? {
           OR: [
@@ -106,6 +108,7 @@ export async function create(input: CreateProductInput) {
       name: input.name,
       variety: input.variety ?? null,
       process: input.process ?? null,
+      category: input.category,
       presentations: {
         create: input.presentations.map((p) => ({
           label: p.label,
@@ -133,6 +136,7 @@ export async function update(id: string, input: UpdateProductInput) {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.variety !== undefined ? { variety: input.variety || null } : {}),
       ...(input.process !== undefined ? { process: input.process || null } : {}),
+      ...(input.category !== undefined ? { category: input.category } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },
     include: productInclude,

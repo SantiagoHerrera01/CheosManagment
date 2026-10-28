@@ -16,6 +16,11 @@ import clientsRoutes from "./modules/clients/clients.routes.js";
 import productsRoutes from "./modules/products/products.routes.js";
 import invoicesRoutes from "./modules/invoices/invoices.routes.js";
 import inventoryRoutes from "./modules/inventory/inventory.routes.js";
+import productionRoutes from "./modules/production/production.routes.js";
+import expensesRoutes from "./modules/expenses/expenses.routes.js";
+import purchasesRoutes from "./modules/purchases/purchases.routes.js";
+import banksRoutes from "./modules/banks/banks.routes.js";
+import reportsRoutes from "./modules/reports/reports.routes.js";
 
 const app = express();
 
@@ -80,6 +85,11 @@ app.use("/api/clients", clientsRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/production", productionRoutes);
+app.use("/api/expenses", expensesRoutes);
+app.use("/api/purchases", purchasesRoutes);
+app.use("/api/banks", banksRoutes);
+app.use("/api/reports", reportsRoutes);
 
 // Documentación interactiva (Swagger UI) — sin autenticación a propósito:
 // es la herramienta con la que el cliente revisa los endpoints.

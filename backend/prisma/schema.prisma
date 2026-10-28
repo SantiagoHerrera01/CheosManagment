@@ -38,6 +38,11 @@ model User {
   invoices      Invoice[]           @relation("InvoiceCreatedBy")
   payments      Payment[]           @relation("PaymentCreatedBy")
   movements     InventoryMovement[] @relation("MovementCreatedBy")
+
+  productionOrders ProductionOrder[] @relation("ProductionCreatedBy")
+  expenses         Expense[]         @relation("ExpenseCreatedBy")
+  purchases        Purchase[]        @relation("PurchaseCreatedBy")
+  bankMovements    BankMovement[]    @relation("BankMovementCreatedBy")
 }
 
 /// Refresh tokens guardados hasheados (SHA-256): robar la BD no da sesiones vivas.
@@ -97,11 +102,20 @@ enum Grind {
   GRANO
 }
 
+/// Qué tipo de artículo es (R5): producto de venta, materia prima
+/// (café en pergamino) o insumo/empaque (bolsas, adhesivos, posillos).
+enum ProductCategory {
+  TERMINADO
+  MATERIA_PRIMA
+  INSUMO
+}
+
 model Product {
   id          String   @id @default(uuid())
   name        String
   variety     String? // Castillo, Chiroso Urrao, Papayo Honey…
   process     String? // Lavado, Natural, Honey…
+  category    ProductCategory @default(TERMINADO)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -131,6 +145,9 @@ model ProductPresentation {
 
   items     InvoiceItem[]
   movements InventoryMovement[]
+  rawMaterialOf  ProductionOrder[]      @relation("OrderRawMaterial")
+  outputOf       ProductionOrder[]      @relation("OrderOutput")
+  purchaseItems  PurchaseItem[]
 
   @@unique([productId, label, grind])
   @@index([productId])
@@ -203,6 +220,9 @@ model InvoiceItem {
   quantity  Int
   unitPrice Decimal
   subtotal  Decimal
+  /// Costo interno al momento de vender (snapshot): permite calcular
+  /// la utilidad del mes aunque el costo del producto cambie después (R7).
+  unitCost  Decimal @default(0)
 
   @@index([invoiceId])
   @@index([presentationId])
@@ -263,4 +283,173 @@ model InventoryMovement {
 
   @@index([presentationId])
   @@index([createdAt])
+}
+
+// ============================================================
+//  PRODUCCIÓN (R4) · órdenes, etapas y rendimiento
+// ============================================================
+
+enum ProductionStatus {
+  EN_PROCESO
+  FINALIZADA
+  CANCELADA
+}
+
+/// Etapas del proceso: trilla (200 kg → 160 kg), tueste (160 → 150)…
+enum ProductionStageType {
+  TRILLA
+  TUESTE
+  LAVADO
+  SECADO
+  EMPAQUE
+  OTRO
+}
+
+model ProductionOrder {
+  id     String            @id @default(uuid())
+  number String            @unique // consecutivo: OP-000001
+  status ProductionStatus  @default(EN_PROCESO)
+
+  /// Insumo/materia prima que entra (ej. café en pergamino).
+  rawMaterialPresentationId String
+  rawMaterialPresentation   ProductPresentation @relation("OrderRawMaterial", fields: [rawMaterialPresentationId], references: [id])
+
+  /// Cantidad inicial de materia prima (kg).
+  inputQuantity Int
+
+  /// Presentación de producto terminado que se empaca al final.
+  outputPresentationId String?
+  outputPresentation   ProductPresentation? @relation("OrderOutput", fields: [outputPresentationId], references: [id])
+
+  /// Unidades de producto terminado que entran a inventario.
+  outputQuantity Int @default(0)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  notes      String?
+
+  createdById String
+  createdBy   User  @relation("ProductionCreatedBy", fields: [createdById], references: [id])
+
+  stages ProductionStage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+/// Rendimiento por etapa: `inputQuantity` kg entran, `outputQuantity` kg
+/// salen; la diferencia es la merma (R4).
+model ProductionStage {
+  id      String           @id @default(uuid())
+  orderId String
+  order   ProductionOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  type          ProductionStageType
+  inputQuantity Int
+  outputQuantity Int
+  /// Merma calculada = input − output (se guarda para reportes).
+  waste Int @default(0)
+  notes String?
+
+  sequence Int
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ============================================================
+//  GASTOS (R6) · utilidad mensual (R7)
+// ============================================================
+
+model Expense {
+  id       String   @id @default(uuid())
+  date     DateTime @default(now())
+  concept  String // "Bolsas 250 g", "Domicilio San Francis", "Cintas"…
+  amount   Decimal
+  category String   @default("Operativo") // libre pero con sugerencias
+  notes    String?
+
+  createdById String
+  createdBy   User   @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([category])
+}
+
+// ============================================================
+//  COMPRAS A PROVEEDOR · ingreso a bodega (R3/R5)
+// ============================================================
+
+model Purchase {
+  id       String   @id @default(uuid())
+  number   String   @unique // consecutivo: C-000001
+  provider String // "Eliseo Carvajal", "San Francis"…
+  date     DateTime @default(now())
+  total    Decimal  @default(0)
+  notes    String?
+
+  createdById String
+  createdBy   User   @relation("PurchaseCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items PurchaseItem[]
+
+  @@index([date])
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  presentationId String
+  presentation   ProductPresentation @relation(fields: [presentationId], references: [id])
+
+  quantity  Int
+  unitCost  Decimal
+  subtotal  Decimal
+
+  @@index([purchaseId])
+}
+
+// ============================================================
+//  BANCOS · cuentas y movimientos
+// ============================================================
+
+model BankAccount {
+  id      String  @id @default(uuid())
+  name    String // "Bancolombia ahorros", "Efectivo caja"…
+  bank    String
+  accountNumber String?
+  balance Decimal @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  movements BankMovement[]
+}
+
+model BankMovement {
+  id      String @id @default(uuid())
+  accountId String
+  account   BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  type     MovementType // ENTRADA | SALIDA | AJUSTE
+  amount   Decimal
+  concept  String
+  date     DateTime @default(now())
+
+  createdById String
+  createdBy   User   @relation("BankMovementCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([accountId])
+  @@index([date])
 }
