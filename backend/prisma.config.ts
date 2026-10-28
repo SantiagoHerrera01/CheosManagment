@@ -3,6 +3,10 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+// Misma selección dev/prod que la app (src/config/database-url.ts):
+// sobrescribe process.env.DATABASE_URL antes de leerla.
+import "./src/config/database-url.js";
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {

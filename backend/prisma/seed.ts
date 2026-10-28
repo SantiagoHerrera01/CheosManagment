@@ -12,6 +12,7 @@
  */
 import { PrismaClient, Role, Grind } from "@prisma/client";
 
+import "../src/config/database-url.js";
 import { hashPassword } from "../src/shared/utils/password.js";
 
 const prisma = new PrismaClient();

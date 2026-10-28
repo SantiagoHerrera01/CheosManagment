@@ -29,6 +29,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PrismaClient } from "@prisma/client";
+import "../src/config/database-url.js";
 
 const prisma = new PrismaClient();
 

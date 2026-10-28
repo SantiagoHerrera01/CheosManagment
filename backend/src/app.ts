@@ -4,6 +4,10 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
 
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { env } from "./config/env.js";
 import { swaggerDocument } from "./docs/swagger.js";
 import { errorHandler, notFoundHandler } from "./shared/middleware/error-handler.js";
@@ -23,6 +27,11 @@ import banksRoutes from "./modules/banks/banks.routes.js";
 import reportsRoutes from "./modules/reports/reports.routes.js";
 
 const app = express();
+
+// Detrás del proxy de Render (HTTPS terminado en el proxy): sin esto,
+// Express ve todo como HTTP y no detecta la IP real (rate-limit) ni
+// `req.secure` (cookies `secure`).
+app.set("trust proxy", 1);
 
 // Cabeceras de seguridad (HSTS, X-Frame-Options, no-sniff, etc.)
 app.use(helmet());
@@ -44,8 +53,9 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
-// Protecciones transversales
-app.use(globalLimiter);
+// Protecciones transversales (el límite se aplica solo a la API:
+// los archivos estáticos del frontend no lo consumen)
+app.use("/api", globalLimiter);
 app.use(originGuard);
 
 /**
@@ -106,6 +116,40 @@ app.use(
 app.get("/api/openapi.json", (req, res) => {
   res.json(swaggerDocument);
 });
+
+// ------------------------------------------------------------
+//  Frontend (SPA) — en un solo servicio: Express sirve el build
+//  de Vite (`frontend/dist`). En dev no existe y no se usa:
+//  Vite lo sirve aparte en :5173.
+// ------------------------------------------------------------
+const frontendDist = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../frontend/dist"
+);
+
+if (existsSync(frontendDist)) {
+  // Archivos estáticos (JS/CSS con hash en /assets): cacheables.
+  app.use(
+    express.static(frontendDist, {
+      index: false,
+      maxAge: "1h",
+      setHeaders: (res, filePath) => {
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    })
+  );
+
+  // SPA fallback: cualquier GET que no sea /api devuelve index.html
+  // (para que las rutas del router funcionen al refrescar: /ventas, etc.)
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    if (req.path.startsWith("/api")) return next();
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
 
 // 404 y manejador global de errores (van al final, siempre)
 app.use(notFoundHandler);

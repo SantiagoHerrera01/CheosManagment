@@ -18,6 +18,14 @@ export function originGuard(req: Request, _res: Response, next: NextFunction) {
   const origin = req.headers.origin;
   if (!origin) return next();
 
+  // Mismo origen (cuando Express sirve el frontend en el mismo servicio):
+  // las peticiones same-origin siempre son legítimas para esta app.
+  try {
+    if (new URL(origin).host === req.headers.host) return next();
+  } catch {
+    // origen mal formado: cae al filtro de abajo
+  }
+
   if (env.CORS_ORIGINS.includes(origin)) return next();
 
   next(ApiError.forbidden(`El origen "${origin}" no está autorizado para esta operación.`));

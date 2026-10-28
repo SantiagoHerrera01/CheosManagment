@@ -9,8 +9,16 @@
  *   con el `{ error: { code, message, details } }` del backend.
  */
 
+/**
+ * URL base de la API:
+ * - En producción (build de Vite servido por el mismo Express) es relativa:
+ *  misma origen = cookies perfectas y sin configurar CORS.
+ * - En desarrollo apunta al backend local.
+ * - `VITE_API_URL` permite sobreescribirlo si algún día se separan.
+ */
 const BASE_URL: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000/api";
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (import.meta.env.DEV ? "http://localhost:3000/api" : "/api");
 
 export class ApiError extends Error {
   readonly status: number;

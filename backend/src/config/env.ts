@@ -1,5 +1,7 @@
 import "dotenv/config";
 
+import { databaseUrl } from "./database-url.js";
+
 /**
  * Acceso tipado y validado a las variables de entorno.
  *
@@ -58,7 +60,7 @@ export const env = {
   isProduction,
 
   PORT: Number(process.env.PORT ?? 3000),
-  DATABASE_URL: read("DATABASE_URL"),
+  DATABASE_URL: databaseUrl,
 
   /** Seguros independientes: comprometer uno no tumba el otro. */
   JWT_ACCESS_SECRET: readSecret("JWT_ACCESS_SECRET", DEV_ACCESS_SECRET),
