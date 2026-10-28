@@ -2,20 +2,41 @@ import {
   BarChart3,
   TrendingUp,
   ShoppingCart,
-  ShoppingBag,
+  Receipt,
   Package,
   DollarSign,
   CalendarDays,
   ArrowUpRight,
+  Loader2,
+  RotateCw,
 } from "lucide-react";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Period = "Hoy" | "7 días" | "30 días" | "Este año";
+import { api, ApiError, qs } from "../lib/api";
+import { PAYMENT_METHOD_LABELS } from "../lib/labels";
+import Select from "../components/ui/Select";
+import type {
+  Invoice,
+  Paginated,
+  PaymentMethod,
+  ProfitReport,
+} from "../types/api";
+
+type Period = "hoy" | "7" | "30" | "year";
+
+const PERIOD_LABELS: Record<Period, string> = {
+  hoy: "Hoy",
+  "7": "Últimos 7 días",
+  "30": "Últimos 30 días",
+  year: "Este año",
+};
 
 type DailySale = {
   day: string;
   sales: number;
+  /** Instante (ms) del inicio del día: sirve como clave única. */
+  key: number;
 };
 
 type ProductReport = {
@@ -24,112 +45,241 @@ type ProductReport = {
   total: number;
 };
 
-const dailySales: DailySale[] = [
-  {
-    day: "Lun",
-    sales: 820000,
-  },
-  {
-    day: "Mar",
-    sales: 1050000,
-  },
-  {
-    day: "Mié",
-    sales: 760000,
-  },
-  {
-    day: "Jue",
-    sales: 1280000,
-  },
-  {
-    day: "Vie",
-    sales: 1450000,
-  },
-  {
-    day: "Sáb",
-    sales: 980000,
-  },
-  {
-    day: "Dom",
-    sales: 640000,
-  },
-];
-
-const topProducts: ProductReport[] = [
-  {
-    name: "Castillo 500 g",
-    quantity: 42,
-    total: 1680000,
-  },
-  {
-    name: "Chiroso Urrao 250 g",
-    quantity: 31,
-    total: 1085000,
-  },
-  {
-    name: "Papayo Honey 250 g",
-    quantity: 24,
-    total: 840000,
-  },
-  {
-    name: "Bourbon Rosado Honey 250 g",
-    quantity: 18,
-    total: 720000,
-  },
-  {
-    name: "Natural Melaza de Caña 250 g",
-    quantity: 15,
-    total: 600000,
-  },
-];
-
-const paymentMethods = [
-  {
-    name: "Efectivo",
-    percentage: 42,
-    value: 2940000,
-  },
-  {
-    name: "Transferencia",
-    percentage: 35,
-    value: 2450000,
-  },
-  {
-    name: "Crédito",
-    percentage: 18,
-    value: 1260000,
-  },
-  {
-    name: "Otros",
-    percentage: 5,
-    value: 350000,
-  },
-];
-
-const formatCurrency = (value: number) => {
-  return `$${value.toLocaleString("es-CO")}`;
+type MethodReport = {
+  name: string;
+  percentage: number;
+  value: number;
 };
 
+type ReportData = {
+  totalSales: number;
+  invoiceCount: number;
+  unitsSold: number;
+  dailySales: DailySale[];
+  topProducts: ProductReport[];
+  paymentMethods: MethodReport[];
+};
+
+const formatCurrency = (value: number) =>
+  `$${value.toLocaleString("es-CO")}`;
+
+/** Rango [from, to] en ISO para el período elegido. */
+function periodRange(period: Period): { from: string; to: string } {
+  const now = new Date();
+
+  const endOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+
+  let from: Date;
+
+  if (period === "hoy") {
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  } else if (period === "year") {
+    from = new Date(now.getFullYear(), 0, 1);
+  } else {
+    const days = Number(period);
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+  }
+
+  return { from: from.toISOString(), to: endOfDay.toISOString() };
+}
+
+/** Recorre todas las páginas del rango (máx. 100 por request). */
+async function fetchInvoices(from: string, to: string): Promise<Invoice[]> {
+  const all: Invoice[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const result = await api.get<Paginated<Invoice>>(
+      `/invoices${qs({ from, to, withItems: "true", page, limit: 100 })}`
+    );
+
+    all.push(...result.data);
+
+    if (all.length >= result.meta.total || result.data.length === 0) break;
+  }
+
+  return all;
+}
+
+function buildReport(invoices: Invoice[]): ReportData {
+  const valid = invoices.filter((invoice) => invoice.status !== "ANULADA");
+
+  const totalSales = valid.reduce((sum, invoice) => sum + invoice.total, 0);
+
+  // --- Ventas agrupadas por día (fecha local de la factura) ---
+  // Se guarda el instante del inicio del día para poder ordenar
+  // cronológicamente sin depender del formato de la etiqueta.
+  const byDay = new Map<number, { label: string; sales: number }>();
+
+  for (const invoice of valid) {
+    const date = new Date(invoice.issueDate);
+
+    const startOfDay = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate()
+    ).getTime();
+
+    const current = byDay.get(startOfDay) ?? {
+      label: new Date(startOfDay).toLocaleDateString("es-CO", {
+        day: "2-digit",
+        month: "2-digit",
+      }),
+      sales: 0,
+    };
+
+    current.sales += invoice.total;
+    byDay.set(startOfDay, current);
+  }
+
+  const dailySales: DailySale[] = [...byDay.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([timestamp, value]) => ({
+      day: value.label,
+      sales: value.sales,
+      // Clave única por instante (evita colisiones de etiquetas).
+      key: timestamp,
+    }));
+
+  // --- Productos más vendidos ---
+  const byProduct = new Map<
+    string,
+    { quantity: number; total: number }
+  >();
+
+  let unitsSold = 0;
+
+  for (const invoice of valid) {
+    for (const item of invoice.items ?? []) {
+      const key = `${item.productName} · ${item.presentationLabel}`;
+      const current = byProduct.get(key) ?? { quantity: 0, total: 0 };
+
+      current.quantity += item.quantity;
+      current.total += item.subtotal;
+
+      byProduct.set(key, current);
+      unitsSold += item.quantity;
+    }
+  }
+
+  const topProducts: ProductReport[] = [...byProduct.entries()]
+    .map(([name, value]) => ({ name, ...value }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  // --- Métodos de pago ---
+  const byMethod = new Map<PaymentMethod, number>();
+
+  for (const invoice of valid) {
+    byMethod.set(
+      invoice.paymentMethod,
+      (byMethod.get(invoice.paymentMethod) ?? 0) + invoice.total
+    );
+  }
+
+  const paymentMethods: MethodReport[] = [...byMethod.entries()]
+    .map(([method, value]) => ({
+      name: PAYMENT_METHOD_LABELS[method] ?? method,
+      value,
+      percentage: totalSales > 0 ? (value / totalSales) * 100 : 0,
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  return {
+    totalSales,
+    invoiceCount: valid.length,
+    unitsSold,
+    dailySales,
+    topProducts,
+    paymentMethods,
+  };
+}
+
 export default function Reports() {
-  const [period, setPeriod] = useState<Period>("7 días");
+  const [period, setPeriod] = useState<Period>("7");
+  const [data, setData] = useState<ReportData | null>(null);
+  /** Utilidad (R7) calculada por el backend: facturado − costo − gastos. */
+  const [profit, setProfit] = useState<ProfitReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const totalSales = dailySales.reduce(
-    (sum, item) => sum + item.sales,
-    0
+  const load = useCallback(() => {
+    const { from, to } = periodRange(period);
+
+    return Promise.all([
+      fetchInvoices(from, to),
+      api.get<ProfitReport>(`/reports/profit${qs({ from, to })}`),
+    ])
+      .then(([invoices, profitReport]) => {
+        setData(buildReport(invoices));
+        setProfit(profitReport);
+      })
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar el reporte."
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [period]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const maxSale = useMemo(
+    () =>
+      data && data.dailySales.length > 0
+        ? Math.max(...data.dailySales.map((item) => item.sales))
+        : 1,
+    [data]
   );
 
-  const totalProductsSold = topProducts.reduce(
-    (sum, product) => sum + product.quantity,
-    0
-  );
+  if (loading) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3 text-[#6F4E37]">
+        <Loader2 size={26} className="animate-spin" />
 
-  const totalPurchases = 3200000;
+        <p className="text-sm font-medium">Generando reporte…</p>
+      </div>
+    );
+  }
 
-  const estimatedProfit = totalSales - totalPurchases;
+  if (loadError) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
+        <p className="text-sm text-red-600">{loadError}</p>
 
-  const maxSale = Math.max(
-    ...dailySales.map((item) => item.sales)
-  );
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            setLoadError(null);
+            void load();
+          }}
+          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-[#6F4E37] hover:bg-[#5B3F2D] text-white text-sm font-semibold transition-colors"
+        >
+          <RotateCw size={16} />
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const averageTicket =
+    data.invoiceCount > 0 ? data.totalSales / data.invoiceCount : 0;
 
   return (
     <div className="space-y-8">
@@ -143,78 +293,52 @@ export default function Reports() {
           </h1>
 
           <p className="text-stone-500 mt-2">
-            Analiza las ventas, compras y comportamiento del negocio.
+            Analiza las ventas y el comportamiento del negocio.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
 
-          <div className="flex items-center gap-2 border border-stone-300 bg-white rounded-xl px-4 py-3">
-
-            <CalendarDays
-              size={18}
-              className="text-stone-500"
+            <Select
+              value={period}
+              onChange={(value) =>
+                setPeriod(value as Period)
+              }
+              aria-label="Periodo"
+              className="font-medium text-stone-700"
+              options={[
+                { value: "hoy", label: "Hoy", icon: CalendarDays },
+                { value: "7", label: "Últimos 7 días", icon: CalendarDays },
+                { value: "30", label: "Últimos 30 días", icon: CalendarDays },
+                { value: "year", label: "Este año", icon: CalendarDays },
+              ]}
             />
 
-            <select
-              value={period}
-              onChange={(event) =>
-                setPeriod(event.target.value as Period)
-              }
-              className="
-                bg-transparent
-                outline-none
-                font-medium
-                text-stone-700
-              "
-            >
-              <option value="Hoy">
-                Hoy
-              </option>
-
-              <option value="7 días">
-                Últimos 7 días
-              </option>
-
-              <option value="30 días">
-                Últimos 30 días
-              </option>
-
-              <option value="Este año">
-                Este año
-              </option>
-            </select>
-
           </div>
-
-        </div>
 
       </div>
 
       {/* TARJETAS */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
 
-        {/* VENTAS */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-6 shadow-sm">
 
           <div className="flex items-start justify-between">
 
             <div>
-              <p className="text-sm text-stone-500">
-                Ventas
-              </p>
+              <p className="text-sm text-stone-500">Ventas</p>
 
-              <p className="text-2xl font-bold text-stone-900 mt-2">
-                {formatCurrency(totalSales)}
+              <p className="text-lg sm:text-2xl font-bold text-stone-900 mt-1.5 sm:mt-2 truncate">
+                {formatCurrency(data.totalSales)}
               </p>
 
               <div className="flex items-center gap-1 mt-3 text-sm text-green-600">
                 <ArrowUpRight size={16} />
-                +12,5%
+                {data.invoiceCount} facturas
               </div>
             </div>
 
-            <div className="bg-stone-100 text-[#6F4E37] p-3 rounded-xl">
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
               <DollarSign size={24} />
             </div>
 
@@ -222,80 +346,75 @@ export default function Reports() {
 
         </div>
 
-        {/* COMPRAS */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-6 shadow-sm">
 
           <div className="flex items-start justify-between">
 
             <div>
               <p className="text-sm text-stone-500">
-                Compras
+                Ticket promedio
               </p>
 
-              <p className="text-2xl font-bold text-stone-900 mt-2">
-                {formatCurrency(totalPurchases)}
+              <p className="text-lg sm:text-2xl font-bold text-stone-900 mt-1.5 sm:mt-2 truncate">
+                {formatCurrency(averageTicket)}
               </p>
 
               <p className="text-sm text-stone-400 mt-3">
-                Inversión realizada
+                Por factura
               </p>
             </div>
 
-            <div className="bg-stone-100 text-[#6F4E37] p-3 rounded-xl">
-              <ShoppingBag size={24} />
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
+              <Receipt size={24} />
             </div>
 
           </div>
 
         </div>
 
-        {/* GANANCIA */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-6 shadow-sm">
 
           <div className="flex items-start justify-between">
 
             <div>
-              <p className="text-sm text-stone-500">
-                Ganancia estimada
-              </p>
+              <p className="text-sm text-stone-500">Facturas</p>
 
-              <p className="text-2xl font-bold text-green-600 mt-2">
-                {formatCurrency(estimatedProfit)}
+              <p className="text-lg sm:text-2xl font-bold text-stone-900 mt-1.5 sm:mt-2 truncate">
+                {data.invoiceCount}
               </p>
 
               <p className="text-sm text-stone-400 mt-3">
-                Ventas - compras
+                Excluye anuladas
               </p>
             </div>
 
-            <div className="bg-green-50 text-green-600 p-3 rounded-xl">
-              <TrendingUp size={24} />
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
+              <ShoppingCart size={24} />
             </div>
 
           </div>
 
         </div>
 
-        {/* PRODUCTOS */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-6 shadow-sm">
 
           <div className="flex items-start justify-between">
 
             <div>
               <p className="text-sm text-stone-500">
-                Productos vendidos
+                Unidades vendidas
               </p>
 
-              <p className="text-2xl font-bold text-stone-900 mt-2">
-                {totalProductsSold}
+              <p className="text-lg sm:text-2xl font-bold text-stone-900 mt-1.5 sm:mt-2 truncate">
+                {data.unitsSold}
               </p>
 
               <p className="text-sm text-stone-400 mt-3">
-                Unidades
+                Productos en el período
               </p>
             </div>
 
-            <div className="bg-stone-100 text-[#6F4E37] p-3 rounded-xl">
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
               <Package size={24} />
             </div>
 
@@ -305,11 +424,115 @@ export default function Reports() {
 
       </div>
 
-      {/* GRÁFICA + MÉTODOS DE PAGO */}
-      <div className="grid grid-cols-3 gap-6">
+      {/* UTILIDAD DEL PERÍODO (R7): facturado − costo de lo vendido − gastos */}
+      {profit && (
+        <div className="bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
 
-        {/* GRÁFICA */}
-        <div className="col-span-2 bg-white border border-stone-200 rounded-2xl shadow-sm p-6">
+          <div className="p-6 border-b border-stone-100 flex items-center justify-between">
+
+            <div>
+              <h2 className="text-xl font-semibold text-stone-900">
+                Utilidad del período
+              </h2>
+
+              <p className="text-sm text-stone-500 mt-1">
+                Calculada con el costo real de cada factura y los gastos
+                registrados.
+              </p>
+            </div>
+
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
+              <TrendingUp size={22} />
+            </div>
+
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-stone-100">
+
+            <div className="p-6">
+              <p className="text-sm text-stone-500">Facturado</p>
+
+              <p className="text-xl font-bold text-stone-900 mt-2">
+                {formatCurrency(profit.invoiced)}
+              </p>
+
+              <p className="text-xs text-stone-400 mt-2">
+                {profit.invoicesCount} facturas
+              </p>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm text-stone-500">Costo de lo vendido</p>
+
+              <p className="text-xl font-bold text-red-600 mt-2">
+                −{formatCurrency(profit.costOfSales)}
+              </p>
+
+              <p className="text-xs text-stone-400 mt-2">
+                Costo real (unitCost × cantidad)
+              </p>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm text-stone-500">Utilidad bruta</p>
+
+              <p
+                className={`text-xl font-bold mt-2 ${
+                  profit.grossProfit >= 0
+                    ? "text-stone-900"
+                    : "text-red-600"
+                }`}
+              >
+                {formatCurrency(profit.grossProfit)}
+              </p>
+
+              <p className="text-xs text-stone-400 mt-2">
+                Margen {profit.grossMargin.toFixed(1)}%
+              </p>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm text-stone-500">Gastos</p>
+
+              <p className="text-xl font-bold text-red-600 mt-2">
+                −{formatCurrency(profit.expenses)}
+              </p>
+
+              <p className="text-xs text-stone-400 mt-2">
+                {profit.expenseCount} gasto
+                {profit.expenseCount === 1 ? "" : "s"} en el período
+              </p>
+            </div>
+
+            <div className="p-6 bg-stone-50">
+              <p className="text-sm font-semibold text-stone-700">
+                Utilidad neta
+              </p>
+
+              <p
+                className={`text-xl font-bold mt-2 ${
+                  profit.netProfit >= 0
+                    ? "text-emerald-600"
+                    : "text-red-600"
+                }`}
+              >
+                {formatCurrency(profit.netProfit)}
+              </p>
+
+              <p className="text-xs text-stone-400 mt-2">
+                Margen {profit.netMargin.toFixed(1)}%
+              </p>
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* GRÁFICA + MÉTODOS DE PAGO */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <div className="lg:col-span-2 bg-white border border-stone-200 rounded-2xl shadow-sm p-6">
 
           <div className="flex items-center justify-between mb-8">
 
@@ -323,23 +546,23 @@ export default function Reports() {
               </p>
             </div>
 
-            <div className="bg-stone-100 text-[#6F4E37] p-3 rounded-xl">
+            <div className="bg-stone-100 text-[#6F4E37] p-2.5 sm:p-3 rounded-xl shrink-0">
               <BarChart3 size={22} />
             </div>
 
           </div>
 
-          <div className="h-72 flex items-end gap-5">
+          {data.dailySales.length === 0 ? (
+            <p className="h-72 flex items-center justify-center text-sm text-stone-500">
+              No hay ventas en este período.
+            </p>
+          ) : (
+            <div className="h-72 flex items-end gap-5 overflow-x-auto">
 
-            {dailySales.map((item) => {
-
-              const height =
-                (item.sales / maxSale) * 100;
-
-              return (
+              {data.dailySales.map((item) => (
                 <div
-                  key={item.day}
-                  className="flex-1 h-full flex flex-col justify-end items-center gap-3"
+                  key={item.key}
+                  className="flex-1 min-w-16 h-full flex flex-col justify-end items-center gap-3"
                 >
 
                   <div className="text-xs font-semibold text-stone-500">
@@ -356,7 +579,10 @@ export default function Reports() {
                       transition-all
                     "
                     style={{
-                      height: `${height}%`,
+                      height: `${Math.max(
+                        (item.sales / maxSale) * 100,
+                        4
+                      )}%`,
                     }}
                   />
 
@@ -365,14 +591,13 @@ export default function Reports() {
                   </span>
 
                 </div>
-              );
-            })}
+              ))}
 
-          </div>
+            </div>
+          )}
 
         </div>
 
-        {/* MÉTODOS DE PAGO */}
         <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-6">
 
           <div className="flex items-center justify-between mb-7">
@@ -394,44 +619,48 @@ export default function Reports() {
 
           </div>
 
-          <div className="space-y-6">
+          {data.paymentMethods.length === 0 ? (
+            <p className="text-sm text-stone-500">
+              Sin ventas en el período.
+            </p>
+          ) : (
+            <div className="space-y-6">
 
-            {paymentMethods.map((method) => (
+              {data.paymentMethods.map((method) => (
+                <div key={method.name}>
 
-              <div key={method.name}>
+                  <div className="flex items-center justify-between mb-2">
 
-                <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-stone-700">
+                      {method.name}
+                    </span>
 
-                  <span className="text-sm font-medium text-stone-700">
-                    {method.name}
-                  </span>
+                    <span className="text-sm font-semibold text-stone-900">
+                      {method.percentage.toFixed(0)}%
+                    </span>
 
-                  <span className="text-sm font-semibold text-stone-900">
-                    {method.percentage}%
-                  </span>
+                  </div>
+
+                  <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+
+                    <div
+                      className="h-full bg-[#6F4E37] rounded-full"
+                      style={{
+                        width: `${method.percentage}%`,
+                      }}
+                    />
+
+                  </div>
+
+                  <p className="text-xs text-stone-400 mt-1">
+                    {formatCurrency(method.value)}
+                  </p>
 
                 </div>
+              ))}
 
-                <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-
-                  <div
-                    className="h-full bg-[#6F4E37] rounded-full"
-                    style={{
-                      width: `${method.percentage}%`,
-                    }}
-                  />
-
-                </div>
-
-                <p className="text-xs text-stone-400 mt-1">
-                  {formatCurrency(method.value)}
-                </p>
-
-              </div>
-
-            ))}
-
-          </div>
+            </div>
+          )}
 
         </div>
 
@@ -459,99 +688,107 @@ export default function Reports() {
 
         </div>
 
-        <table className="w-full">
+        {data.topProducts.length === 0 ? (
+          <p className="p-6 text-sm text-stone-500">
+            No hay productos vendidos en este período.
+          </p>
+        ) : (
+          <table className="w-full">
 
-          <thead className="bg-stone-50 border-b border-stone-200">
+            <thead className="bg-stone-50 border-b border-stone-200">
 
-            <tr className="text-left text-sm text-stone-500">
+              <tr className="text-left text-sm text-stone-500">
 
-              <th className="px-6 py-4 font-semibold">
-                PRODUCTO
-              </th>
+                <th className="px-6 py-4 font-semibold">
+                  PRODUCTO
+                </th>
 
-              <th className="px-6 py-4 font-semibold">
-                UNIDADES VENDIDAS
-              </th>
+                <th className="px-6 py-4 font-semibold">
+                  UNIDADES VENDIDAS
+                </th>
 
-              <th className="px-6 py-4 font-semibold">
-                VENTAS
-              </th>
+                <th className="px-6 py-4 font-semibold">
+                  VENTAS
+                </th>
 
-              <th className="px-6 py-4 font-semibold">
-                PARTICIPACIÓN
-              </th>
+                <th className="px-6 py-4 font-semibold">
+                  PARTICIPACIÓN
+                </th>
 
-            </tr>
+              </tr>
 
-          </thead>
+            </thead>
 
-          <tbody>
+            <tbody>
 
-            {topProducts.map((product) => {
+              {data.topProducts.map((product) => {
 
-              const participation =
-                (product.total / totalSales) * 100;
+                const participation =
+                  data.totalSales > 0
+                    ? (product.total / data.totalSales) * 100
+                    : 0;
 
-              return (
-                <tr
-                  key={product.name}
-                  className="
-                    border-b
-                    border-stone-100
-                    hover:bg-stone-50
-                    transition
-                  "
-                >
+                return (
+                  <tr
+                    key={product.name}
+                    className="
+                      border-b
+                      border-stone-100
+                      hover:bg-stone-50
+                      transition
+                    "
+                  >
 
-                  <td className="px-6 py-5">
+                    <td className="px-6 py-5">
 
-                    <span className="font-semibold text-stone-900">
-                      {product.name}
-                    </span>
+                      <span className="font-semibold text-stone-900">
+                        {product.name}
+                      </span>
 
-                  </td>
+                    </td>
 
-                  <td className="px-6 py-5 text-stone-600">
-                    {product.quantity}
-                  </td>
+                    <td className="px-6 py-5 text-stone-600">
+                      {product.quantity}
+                    </td>
 
-                  <td className="px-6 py-5 font-semibold">
-                    {formatCurrency(product.total)}
-                  </td>
+                    <td className="px-6 py-5 font-semibold">
+                      {formatCurrency(product.total)}
+                    </td>
 
-                  <td className="px-6 py-5">
+                    <td className="px-6 py-5">
 
-                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3">
 
-                      <div className="w-32 h-2 bg-stone-100 rounded-full overflow-hidden">
+                        <div className="w-32 h-2 bg-stone-100 rounded-full overflow-hidden">
 
-                        <div
-                          className="h-full bg-[#6F4E37] rounded-full"
-                          style={{
-                            width: `${Math.min(
-                              participation * 2,
-                              100
-                            )}%`,
-                          }}
-                        />
+                          <div
+                            className="h-full bg-[#6F4E37] rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                participation * 2,
+                                100
+                              )}%`,
+                            }}
+                          />
+
+                        </div>
+
+                        <span className="text-sm text-stone-500">
+                          {participation.toFixed(1)}%
+                        </span>
 
                       </div>
 
-                      <span className="text-sm text-stone-500">
-                        {participation.toFixed(1)}%
-                      </span>
+                    </td>
 
-                    </div>
+                  </tr>
+                );
+              })}
 
-                  </td>
+            </tbody>
 
-                </tr>
-              );
-            })}
-
-          </tbody>
-
-        </table>
+          </table>
+        )}
 
       </div>
 
@@ -561,7 +798,7 @@ export default function Reports() {
         <div className="flex items-center gap-4">
 
           <div className="bg-white/10 p-3 rounded-xl">
-            <BarChart3 size={24} />
+            <TrendingUp size={24} />
           </div>
 
           <div>
@@ -570,7 +807,8 @@ export default function Reports() {
             </p>
 
             <p className="text-sm text-white/70">
-              Mostrando información correspondiente a: {period}
+              Mostrando información correspondiente a:{" "}
+              {PERIOD_LABELS[period]}
             </p>
           </div>
 
@@ -583,7 +821,7 @@ export default function Reports() {
           </p>
 
           <p className="text-2xl font-bold">
-            {formatCurrency(totalSales)}
+            {formatCurrency(data.totalSales)}
           </p>
 
         </div>

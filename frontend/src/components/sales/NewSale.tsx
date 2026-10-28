@@ -1,66 +1,31 @@
 import {
-  ArrowLeft,
   Banknote,
+  Check,
   CreditCard,
   Landmark,
+  Loader2,
   ShoppingCart,
   UserRound,
   Wallet,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import SaleProducts from "./SaleProducts";
-
-type Customer = {
-  id: number;
-  name: string;
-  document: string;
-};
-
-type CartItem = {
-  id: string;
-  productId: number;
-  name: string;
-  size: string;
-  type: string;
-  price: number;
-  cost: number;
-  quantity: number;
-};
-
-type PaymentMethod =
-  | "efectivo"
-  | "transferencia"
-  | "contra_entrega"
-  | "credito"
-  | "abono";
+import SaleProducts, { type CartItem } from "./SaleProducts";
+import { api, ApiError, qs } from "../../lib/api";
+import Select from "../ui/Select";
+import type {
+  Client,
+  CreateInvoiceInput,
+  Invoice,
+  Paginated,
+  PaymentMethod,
+} from "../../types/api";
 
 type NewSaleProps = {
   onBack: () => void;
+  /** Se llama después de crear la factura (para recargar la lista padre). */
+  onSaleCreated?: () => void;
 };
-
-const customers: Customer[] = [
-  {
-    id: 1,
-    name: "Consumidor Final",
-    document: "222222222",
-  },
-  {
-    id: 2,
-    name: "Juan Pérez",
-    document: "10203040",
-  },
-  {
-    id: 3,
-    name: "Café Central",
-    document: "900456789",
-  },
-  {
-    id: 4,
-    name: "Tienda La 80",
-    document: "901234567",
-  },
-];
 
 const bankAccounts = [
   {
@@ -98,16 +63,46 @@ function formatCurrency(value: number) {
   });
 }
 
-export default function NewSale({ onBack }: NewSaleProps) {
+/** Mensaje legible para el banner de error (prioriza issues de zod). */
+function getApiErrorMessage(error: unknown) {
+  if (!(error instanceof ApiError)) {
+    return "No fue posible registrar la venta.";
+  }
+
+  const details = error.details;
+
+  if (Array.isArray(details) && details.length > 0) {
+    const firstIssue = details[0] as { message?: unknown };
+
+    if (
+      firstIssue &&
+      typeof firstIssue.message === "string" &&
+      firstIssue.message.trim() !== ""
+    ) {
+      return firstIssue.message;
+    }
+  }
+
+  return error.message;
+}
+
+export default function NewSale({
+  onBack,
+  onSaleCreated,
+}: NewSaleProps) {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
 
   const [selectedCustomer, setSelectedCustomer] =
-    useState<Customer | null>(null);
+    useState<Client | null>(null);
 
   const [items, setItems] = useState<CartItem[]>([]);
 
   const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>("efectivo");
+    useState<PaymentMethod>("EFECTIVO");
 
   const [selectedBank, setSelectedBank] = useState("");
 
@@ -115,9 +110,56 @@ export default function NewSale({ onBack }: NewSaleProps) {
 
   const [receivedAmount, setReceivedAmount] = useState("");
 
+  const [saving, setSaving] = useState(false);
+
+  const [savingError, setSavingError] = useState<string | null>(null);
+
   const [saved, setSaved] = useState(false);
 
-  const filteredCustomers = customers.filter((customer) => {
+  const [createdInvoice, setCreatedInvoice] = useState<Invoice | null>(null);
+
+  /** Descarga todos los clientes activos (sin tocar estado). */
+  const fetchClients = useCallback(async () => {
+    const all: Client[] = [];
+
+    // El backend limita a 100 por página: recorremos todas las páginas.
+    for (let page = 1; ; page += 1) {
+      const result = await api.get<Paginated<Client>>(
+        `/clients${qs({ active: true, page, limit: 100 })}`
+      );
+
+      all.push(...result.data);
+
+      if (all.length >= result.meta.total || result.data.length === 0) {
+        break;
+      }
+    }
+
+    return all;
+  }, []);
+
+  const loadClients = useCallback(() => {
+    return fetchClients()
+      .then((all) => {
+        setClients(all);
+      })
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar los clientes."
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [fetchClients]);
+
+  useEffect(() => {
+    void loadClients();
+  }, [loadClients]);
+
+  const filteredCustomers = clients.filter((customer) => {
     const value = search.toLowerCase().trim();
 
     if (!value) {
@@ -125,8 +167,8 @@ export default function NewSale({ onBack }: NewSaleProps) {
     }
 
     return (
-      customer.name.toLowerCase().includes(value) ||
-      customer.document.includes(value)
+      customer.fullName.toLowerCase().includes(value) ||
+      customer.documentNumber.includes(value)
     );
   });
 
@@ -161,74 +203,252 @@ export default function NewSale({ onBack }: NewSaleProps) {
   );
 
   const canSave =
+    !saving &&
     selectedCustomer !== null &&
     items.length > 0 &&
     total > 0 &&
-    (paymentMethod !== "transferencia" ||
+    (paymentMethod !== "TRANSFERENCIA" ||
       selectedBank !== "") &&
-    (paymentMethod !== "abono" ||
+    (paymentMethod !== "ABONO" ||
       received > 0);
 
-  const handleSaveSale = () => {
-    if (!canSave) {
+  const handleNewSale = () => {
+    setItems([]);
+    setDiscount("");
+    setReceivedAmount("");
+    setSavingError(null);
+    setCreatedInvoice(null);
+    setSaved(false);
+  };
+
+  const handleSaveSale = async () => {
+    if (saving) {
       return;
     }
 
-    setSaved(true);
+    if (!selectedCustomer) {
+      setSavingError("Selecciona un cliente para continuar.");
+      return;
+    }
 
-    setTimeout(() => {
-      setSaved(false);
-    }, 3000);
+    if (items.length === 0) {
+      setSavingError("Agrega al menos un producto a la venta.");
+      return;
+    }
+
+    if (!canSave) {
+      setSavingError("Revisa la información de la venta.");
+      return;
+    }
+
+    setSaving(true);
+    setSavingError(null);
+
+    const payload: CreateInvoiceInput = {
+      clientId: selectedCustomer.id,
+      items: items.map((item) => ({
+        presentationId: item.presentationId,
+        quantity: item.quantity,
+      })),
+      discount: Number(discount || 0),
+      paymentMethod,
+      initialPayment:
+        paymentMethod === "ABONO"
+          ? Number(receivedAmount || 0) || null
+          : null,
+      creditDays: 30,
+      notes: null,
+    };
+
+    try {
+      const invoice = await api.post<Invoice>("/invoices", payload);
+
+      setCreatedInvoice(invoice);
+      setSaved(true);
+      onSaleCreated?.();
+    } catch (error) {
+      // El formulario conserva su estado: solo se muestra el error.
+      setSavingError(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
+  if (saved && createdInvoice) {
+    return (
+      <div className="space-y-6">
 
-      {/* =========================================
-          ENCABEZADO
-      ========================================= */}
+        {/* =========================================
+            CONFIRMACIÓN
+        ========================================= */}
 
-      <div className="flex items-center gap-4">
-
-        <button
-          type="button"
-          onClick={onBack}
+        <section
           className="
-            w-10
-            h-10
-            rounded-xl
+            bg-white
             border
             border-stone-200
-            bg-white
-            flex
-            items-center
-            justify-center
-            text-stone-600
-            hover:bg-stone-50
-            transition
-            shrink-0
+            rounded-xl
+            shadow-sm
+            p-8
+            sm:p-12
           "
         >
-          <ArrowLeft size={20} />
-        </button>
 
-        <div>
-          <h1 className="text-3xl font-bold text-stone-900">
-            Nueva venta
+          <div
+            className="
+              w-14
+              h-14
+              rounded-full
+              bg-green-100
+              text-green-600
+              flex
+              items-center
+              justify-center
+              mx-auto
+            "
+          >
+            <Check size={26} />
+          </div>
+
+          <h1 className="text-2xl font-bold text-stone-900 text-center mt-5">
+            Venta registrada
           </h1>
 
-          <p className="text-stone-500 mt-1">
-            Registra una nueva venta de Cheo's Café.
+          <p className="text-stone-500 text-center mt-2">
+            La factura {createdInvoice.number} se creó correctamente.
           </p>
-        </div>
+
+          <div
+            className="
+              mt-6
+              max-w-sm
+              mx-auto
+              border
+              border-stone-200
+              rounded-xl
+              overflow-hidden
+            "
+          >
+
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                gap-4
+                px-4
+                py-3
+                border-b
+                border-stone-100
+              "
+            >
+
+              <span className="text-sm text-stone-500">
+                Cliente
+              </span>
+
+              <span className="text-sm font-semibold text-stone-800 text-right">
+                {createdInvoice.client.fullName}
+
+                <span className="block text-xs font-normal text-stone-500 mt-0.5">
+                  {createdInvoice.client.documentNumber}
+                </span>
+              </span>
+
+            </div>
+
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                gap-4
+                px-4
+                py-3
+              "
+            >
+
+              <span className="text-sm text-stone-500">
+                Total
+              </span>
+
+              <span className="font-bold text-[#6F4E37]">
+                {formatCurrency(createdInvoice.total)}
+              </span>
+
+            </div>
+
+          </div>
+
+          <div
+            className="
+              mt-8
+              flex
+              flex-col
+              sm:flex-row
+              items-center
+              justify-center
+              gap-3
+            "
+          >
+
+            <button
+              type="button"
+              onClick={handleNewSale}
+              className="
+                w-full
+                sm:w-auto
+                min-w-[220px]
+                bg-[#6F4E37]
+                hover:bg-[#5B3F2D]
+                text-white
+                px-7
+                py-4
+                rounded-xl
+                font-semibold
+                transition
+              "
+            >
+              Nueva venta
+            </button>
+
+            <button
+              type="button"
+              onClick={onBack}
+              className="
+                w-full
+                sm:w-auto
+                min-w-[220px]
+                border
+                border-stone-300
+                text-stone-700
+                px-7
+                py-4
+                rounded-xl
+                font-semibold
+                hover:bg-stone-50
+                transition
+              "
+            >
+              Volver a ventas
+            </button>
+
+          </div>
+
+        </section>
 
       </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
 
       {/* =========================================
           CLIENTE
       ========================================= */}
 
-      <section className="bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
+      <section className="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
 
         <div className="p-5 sm:p-6 border-b border-stone-200">
 
@@ -299,11 +519,11 @@ export default function NewSale({ onBack }: NewSaleProps) {
 
                   <div>
                     <p className="font-semibold text-stone-900">
-                      {selectedCustomer.name}
+                      {selectedCustomer.fullName}
                     </p>
 
                     <p className="text-sm text-stone-500">
-                      Documento: {selectedCustomer.document}
+                      Documento: {selectedCustomer.documentNumber}
                     </p>
                   </div>
 
@@ -326,6 +546,64 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 </button>
 
               </div>
+
+            </div>
+
+          ) : loading ? (
+
+            <div
+              className="
+                border
+                border-stone-200
+                rounded-xl
+                p-6
+                text-center
+              "
+            >
+
+              <Loader2
+                size={26}
+                className="mx-auto text-[#6F4E37] animate-spin"
+              />
+
+              <p className="mt-3 text-sm text-stone-500">
+                Cargando clientes…
+              </p>
+
+            </div>
+
+          ) : loadError ? (
+
+            <div
+              className="
+                bg-red-50
+                border
+                border-red-200
+                text-red-700
+                text-sm
+                rounded-xl
+                px-4
+                py-3
+                flex
+                items-center
+                justify-between
+                gap-3
+              "
+            >
+
+              <span>{loadError}</span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  setLoadError(null);
+                  void loadClients();
+                }}
+                className="font-semibold underline shrink-0"
+              >
+                Reintentar
+              </button>
 
             </div>
 
@@ -410,11 +688,11 @@ export default function NewSale({ onBack }: NewSaleProps) {
 
                         <div>
                           <p className="font-semibold text-stone-800">
-                            {customer.name}
+                            {customer.fullName}
                           </p>
 
                           <p className="text-sm text-stone-500">
-                            {customer.document}
+                            {customer.documentNumber}
                           </p>
                         </div>
 
@@ -460,7 +738,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
           bg-white
           border
           border-stone-200
-          rounded-2xl
+          rounded-xl
           shadow-sm
           overflow-hidden
         "
@@ -600,7 +878,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
           bg-white
           border
           border-stone-200
-          rounded-2xl
+          rounded-xl
           shadow-sm
           overflow-hidden
         "
@@ -650,7 +928,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
             <button
               type="button"
               onClick={() => {
-                setPaymentMethod("efectivo");
+                setPaymentMethod("EFECTIVO");
                 setSelectedBank("");
                 setReceivedAmount("");
               }}
@@ -661,7 +939,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 text-left
                 transition
                 ${
-                  paymentMethod === "efectivo"
+                  paymentMethod === "EFECTIVO"
                     ? "border-[#6F4E37] bg-[#FAF7F4]"
                     : "border-stone-200 hover:bg-stone-50"
                 }
@@ -688,7 +966,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
             <button
               type="button"
               onClick={() => {
-                setPaymentMethod("transferencia");
+                setPaymentMethod("TRANSFERENCIA");
                 setReceivedAmount("");
               }}
               className={`
@@ -698,7 +976,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 text-left
                 transition
                 ${
-                  paymentMethod === "transferencia"
+                  paymentMethod === "TRANSFERENCIA"
                     ? "border-[#6F4E37] bg-[#FAF7F4]"
                     : "border-stone-200 hover:bg-stone-50"
                 }
@@ -725,7 +1003,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
             <button
               type="button"
               onClick={() => {
-                setPaymentMethod("contra_entrega");
+                setPaymentMethod("CONTRA_ENTREGA");
                 setSelectedBank("");
                 setReceivedAmount("");
               }}
@@ -736,7 +1014,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 text-left
                 transition
                 ${
-                  paymentMethod === "contra_entrega"
+                  paymentMethod === "CONTRA_ENTREGA"
                     ? "border-[#6F4E37] bg-[#FAF7F4]"
                     : "border-stone-200 hover:bg-stone-50"
                 }
@@ -763,7 +1041,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
             <button
               type="button"
               onClick={() => {
-                setPaymentMethod("credito");
+                setPaymentMethod("CREDITO");
                 setSelectedBank("");
                 setReceivedAmount("");
               }}
@@ -774,7 +1052,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 text-left
                 transition
                 ${
-                  paymentMethod === "credito"
+                  paymentMethod === "CREDITO"
                     ? "border-[#6F4E37] bg-[#FAF7F4]"
                     : "border-stone-200 hover:bg-stone-50"
                 }
@@ -801,7 +1079,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
             <button
               type="button"
               onClick={() => {
-                setPaymentMethod("abono");
+                setPaymentMethod("ABONO");
                 setSelectedBank("");
               }}
               className={`
@@ -811,7 +1089,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 text-left
                 transition
                 ${
-                  paymentMethod === "abono"
+                  paymentMethod === "ABONO"
                     ? "border-[#6F4E37] bg-[#FAF7F4]"
                     : "border-stone-200 hover:bg-stone-50"
                 }
@@ -839,7 +1117,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               TRANSFERENCIA
           ========================================= */}
 
-          {paymentMethod === "transferencia" && (
+          {paymentMethod === "TRANSFERENCIA" && (
 
             <div
               className="
@@ -856,40 +1134,19 @@ export default function NewSale({ onBack }: NewSaleProps) {
                 Cuenta donde recibimos el dinero
               </label>
 
-              <select
+              <Select
                 value={selectedBank}
-                onChange={(event) =>
-                  setSelectedBank(event.target.value)
+                onChange={(value) =>
+                  setSelectedBank(value)
                 }
-                className="
-                  w-full
-                  border
-                  border-stone-300
-                  rounded-xl
-                  bg-white
-                  px-4
-                  py-3
-                  outline-none
-                  focus:border-[#6F4E37]
-                "
-              >
-
-                <option value="">
-                  Seleccionar cuenta...
-                </option>
-
-                {bankAccounts.map((bank) => (
-
-                  <option
-                    key={bank.id}
-                    value={bank.id}
-                  >
-                    {bank.name}
-                  </option>
-
-                ))}
-
-              </select>
+                placeholder="Seleccionar cuenta..."
+                aria-label="Cuenta bancaria"
+                options={bankAccounts.map((bank) => ({
+                  value: bank.id,
+                  label: bank.name,
+                  icon: Landmark,
+                }))}
+              />
 
               <p className="text-xs text-stone-500 mt-2">
                 Esta cuenta será la que posteriormente
@@ -904,7 +1161,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               ABONO
           ========================================= */}
 
-          {paymentMethod === "abono" && (
+          {paymentMethod === "ABONO" && (
 
             <div
               className="
@@ -997,7 +1254,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               EFECTIVO
           ========================================= */}
 
-          {paymentMethod === "efectivo" && (
+          {paymentMethod === "EFECTIVO" && (
 
             <div
               className="
@@ -1089,7 +1346,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               CRÉDITO
           ========================================= */}
 
-          {paymentMethod === "credito" && (
+          {paymentMethod === "CREDITO" && (
 
             <div
               className="
@@ -1132,7 +1389,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               CONTRA ENTREGA
           ========================================= */}
 
-          {paymentMethod === "contra_entrega" && (
+          {paymentMethod === "CONTRA_ENTREGA" && (
 
             <div
               className="
@@ -1183,11 +1440,17 @@ export default function NewSale({ onBack }: NewSaleProps) {
           bg-[#FAF7F4]
           border
           border-[#D9C8BB]
-          rounded-2xl
+          rounded-xl
           p-5
           sm:p-6
         "
       >
+
+        {savingError && (
+          <div className="mb-5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+            {savingError}
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
 
@@ -1203,7 +1466,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
 
             {selectedCustomer && (
               <p className="text-sm text-stone-500 mt-2">
-                Cliente: {selectedCustomer.name}
+                Cliente: {selectedCustomer.fullName}
               </p>
             )}
 
@@ -1217,6 +1480,10 @@ export default function NewSale({ onBack }: NewSaleProps) {
               w-full
               sm:w-auto
               min-w-[220px]
+              inline-flex
+              items-center
+              justify-center
+              gap-2
               bg-[#6F4E37]
               hover:bg-[#5B3F2D]
               disabled:bg-stone-300
@@ -1230,6 +1497,7 @@ export default function NewSale({ onBack }: NewSaleProps) {
               transition
             "
           >
+            {saving && <Loader2 size={17} className="animate-spin" />}
             Registrar venta
           </button>
 
@@ -1239,31 +1507,14 @@ export default function NewSale({ onBack }: NewSaleProps) {
           <p className="text-sm text-red-500 mt-4">
             {!selectedCustomer
               ? "Selecciona un cliente para continuar."
-              : paymentMethod === "transferencia" &&
+              : paymentMethod === "TRANSFERENCIA" &&
                 !selectedBank
               ? "Selecciona la cuenta donde recibiste la transferencia."
-              : paymentMethod === "abono" &&
+              : paymentMethod === "ABONO" &&
                 received <= 0
               ? "Ingresa el valor del abono."
               : "Revisa la información de la venta."}
           </p>
-        )}
-
-        {saved && (
-          <div
-            className="
-              mt-4
-              bg-green-50
-              border
-              border-green-200
-              text-green-700
-              rounded-xl
-              p-4
-              font-medium
-            "
-          >
-            ✓ Venta registrada correctamente.
-          </div>
         )}
 
       </section>

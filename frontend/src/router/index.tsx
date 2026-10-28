@@ -1,78 +1,157 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import MainLayout from "../layouts/MainLayout";
+import RouteError from "../components/RouteError";
 
-import Dashboard from "../pages/Dashboard";
-import Products from "../pages/Products";
-import Inventory from "../pages/Inventory";
-import ProductionPage from "../pages/ProductionPage";
-import Cartera from "../pages/Cartera";
-import Purchases from "../pages/Purchases";
-import Sales from "../pages/Sales";
-import Customers from "../pages/Customers";
-import Reports from "../pages/Reports";
-import Settings from "../pages/Settings";
-import Banks from "../pages/Banks";
+import RequireAuth from "./RequireAuth";
+
+import {
+  Banks,
+  Cartera,
+  Customers,
+  Dashboard,
+  Expenses,
+  Inventory,
+  LazyPage,
+  Login,
+  ProductionPage,
+  Products,
+  Purchases,
+  Reports,
+  Sales,
+  Settings,
+} from "./pages";
 
 export const router = createBrowserRouter([
   {
+    path: "/login",
+    element: (
+      <LazyPage>
+        <Login />
+      </LazyPage>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
     path: "/",
-    element: <MainLayout />,
+    element: (
+      <RequireAuth>
+        <MainLayout />
+      </RequireAuth>
+    ),
+    errorElement: <RouteError />,
     children: [
       {
         index: true,
-        element: <Dashboard />,
+        element: (
+          <LazyPage>
+            <Dashboard />
+          </LazyPage>
+        ),
       },
 
       {
         path: "ventas",
-        element: <Sales />,
+        element: (
+          <LazyPage>
+            <Sales />
+          </LazyPage>
+        ),
       },
 
       {
         path: "clientes",
-        element: <Customers />,
+        element: (
+          <LazyPage>
+            <Customers />
+          </LazyPage>
+        ),
       },
 
       {
         path: "productos",
-        element: <Products />,
+        element: (
+          <LazyPage>
+            <Products />
+          </LazyPage>
+        ),
       },
 
       {
         path: "inventario",
-        element: <Inventory />,
+        element: (
+          <LazyPage>
+            <Inventory />
+          </LazyPage>
+        ),
       },
 
       {
         path: "produccion",
-        element: <ProductionPage />,
+        element: (
+          <LazyPage>
+            <ProductionPage />
+          </LazyPage>
+        ),
       },
 
       {
         path: "cartera",
-        element: <Cartera />,
+        element: (
+          <LazyPage>
+            <Cartera />
+          </LazyPage>
+        ),
+      },
+
+      {
+        path: "gastos",
+        element: (
+          <LazyPage>
+            <Expenses />
+          </LazyPage>
+        ),
       },
 
       {
         path: "bancos",
-        element: <Banks />,
+        element: (
+          <LazyPage>
+            <Banks />
+          </LazyPage>
+        ),
       },
 
       {
         path: "compras",
-        element: <Purchases />,
+        element: (
+          <LazyPage>
+            <Purchases />
+          </LazyPage>
+        ),
       },
 
       {
         path: "reportes",
-        element: <Reports />,
+        element: (
+          <LazyPage>
+            <Reports />
+          </LazyPage>
+        ),
       },
 
       {
         path: "configuracion",
-        element: <Settings />,
+        element: (
+          <LazyPage>
+            <Settings />
+          </LazyPage>
+        ),
       },
     ],
+  },
+  {
+    path: "*",
+    element: <Navigate to="/" replace />,
   },
 ]);

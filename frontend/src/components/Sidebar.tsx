@@ -7,6 +7,7 @@ import {
   Wallet,
   Landmark,
   ShoppingBag,
+  Receipt,
   BarChart3,
   Settings,
   Coffee,
@@ -14,7 +15,19 @@ import {
 
 import { NavLink } from "react-router-dom";
 
-const menuItems = [
+import { useAuth } from "../context/auth-context";
+import { ROLE_LABELS, initials } from "../lib/roles";
+import type { Role } from "../types/api";
+
+interface MenuItem {
+  name: string;
+  path: string;
+  icon: typeof LayoutDashboard;
+  /** Roles que ven el item (ADMIN siempre). Sin `roles` = todos. `[]` = solo ADMIN. */
+  roles?: Role[];
+}
+
+const menuItems: MenuItem[] = [
   {
     name: "Dashboard",
     path: "/",
@@ -24,52 +37,87 @@ const menuItems = [
     name: "Ventas",
     path: "/ventas",
     icon: ShoppingCart,
+    roles: ["VENDEDOR", "CONTADOR"],
   },
   {
     name: "Clientes",
     path: "/clientes",
     icon: Users,
+    roles: ["VENDEDOR", "CONTADOR"],
   },
   {
     name: "Inventario",
     path: "/inventario",
     icon: Package,
+    roles: ["BODEGA"],
   },
   {
     name: "Producción",
     path: "/produccion",
     icon: Factory,
+    roles: ["BODEGA"],
   },
   {
     name: "Cartera",
     path: "/cartera",
     icon: Wallet,
+    roles: ["VENDEDOR", "CONTADOR"],
+  },
+  {
+    name: "Gastos",
+    path: "/gastos",
+    icon: Receipt,
+    roles: ["VENDEDOR", "CONTADOR"],
   },
   {
     name: "Bancos",
     path: "/bancos",
     icon: Landmark,
+    roles: ["CONTADOR"],
   },
   {
     name: "Compras",
     path: "/compras",
     icon: ShoppingBag,
+    roles: ["CONTADOR", "BODEGA"],
   },
   {
     name: "Reportes",
     path: "/reportes",
     icon: BarChart3,
+    roles: ["CONTADOR"],
   },
   {
     name: "Configuración",
     path: "/configuracion",
     icon: Settings,
+    roles: [],
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  /**
+   * Se ejecuta al navegar desde el menú. En móvil sirve para cerrar el
+   * drawer; en escritorio puede quedar vacío.
+   */
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({ onNavigate }: SidebarProps) {
+  const { user, hasRole } = useAuth();
+
+  if (!user) return null;
+
+  // ADMIN ve todo; el resto solo los items cuyo rol coincide.
+  // `roles: []` → solo ADMIN (hasRole sin argumentos solo lo cumple ADMIN).
+  const visibleItems = menuItems.filter(
+    (item) => !item.roles || hasRole(...item.roles)
+  );
+
+  const avatarInitials = initials(user.fullName);
+
   return (
-    <aside className="w-64 min-h-screen bg-[#3E2924] text-white flex flex-col">
+    <aside className="w-64 h-full min-h-screen bg-[#3E2924] text-white flex flex-col overflow-y-auto">
 
       {/* =========================================
           LOGO / NEGOCIO
@@ -105,7 +153,7 @@ export default function Sidebar() {
 
         <div className="space-y-1">
 
-          {menuItems.map((item) => {
+          {visibleItems.map((item) => {
 
             const Icon = item.icon;
 
@@ -114,6 +162,7 @@ export default function Sidebar() {
                 key={item.path}
                 to={item.path}
                 end={item.path === "/"}
+                onClick={onNavigate}
                 className={({ isActive }) =>
                   `
                   group
@@ -155,25 +204,25 @@ export default function Sidebar() {
       </nav>
 
       {/* =========================================
-          PARTE INFERIOR
+          PARTE INFERIOR: usuario (el logout vive en el header)
       ========================================= */}
 
       <div className="px-4 py-4 border-t border-white/10">
 
         <div className="flex items-center gap-3 px-2">
 
-          <div className="w-9 h-9 rounded-full bg-[#6F4E37] flex items-center justify-center text-sm font-bold">
-            A
+          <div className="w-9 h-9 rounded-full bg-[#6F4E37] flex items-center justify-center text-sm font-bold shrink-0">
+            {avatarInitials}
           </div>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
 
             <p className="text-sm font-semibold truncate">
-              Administrador
+              {user.fullName}
             </p>
 
             <p className="text-xs text-white/50">
-              Cheo's Café
+              {ROLE_LABELS[user.role]}
             </p>
 
           </div>

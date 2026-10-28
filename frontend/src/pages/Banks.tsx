@@ -1,70 +1,26 @@
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Landmark,
+  Loader2,
+  Minus,
   Plus,
+  RotateCw,
+  SlidersHorizontal,
   Wallet,
-  Eye,
-  TrendingUp,
-  TrendingDown,
 } from "lucide-react";
 
-type BankAccount = {
-  id: number;
-  bank: string;
-  name: string;
-  type: string;
-  number: string;
-  balance: number;
-  income: number;
-  expenses: number;
-};
-
-const accounts: BankAccount[] = [
-  {
-    id: 1,
-    bank: "Bancolombia",
-    name: "Cta. Omar",
-    type: "Cuenta corriente",
-    number: "**** 4582",
-    balance: 5400000,
-    income: 1850000,
-    expenses: 620000,
-  },
-
-  {
-    id: 2,
-    bank: "Bancolombia",
-    name: "Cta. Cheo",
-    type: "Cuenta corriente",
-    number: "**** 7314",
-    balance: 3250000,
-    income: 1420000,
-    expenses: 480000,
-  },
-
-  {
-    id: 3,
-    bank: "Bancolombia",
-    name: "Cta. Emiliano",
-    type: "Cuenta de ahorros",
-    number: "**** 2198",
-    balance: 2750000,
-    income: 980000,
-    expenses: 310000,
-  },
-
-  {
-    id: 4,
-    bank: "Nequi",
-    name: "Nequi Gustavo",
-    type: "Cuenta digital",
-    number: "**** 9021",
-    balance: 1450000,
-    income: 600000,
-    expenses: 180000,
-  },
-];
+import { api, ApiError, qs } from "../lib/api";
+import Modal from "../components/ui/Modal";
+import Select from "../components/ui/Select";
+import type {
+  BankAccount,
+  BankMovement,
+  BankMovementType,
+  Paginated,
+} from "../types/api";
 
 function formatCurrency(value: number) {
   return value.toLocaleString("es-CO", {
@@ -74,474 +30,647 @@ function formatCurrency(value: number) {
   });
 }
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-CO", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const MOVEMENT_LABELS: Record<BankMovementType, string> = {
+  ENTRADA: "Entrada",
+  SALIDA: "Salida",
+  AJUSTE: "Ajuste",
+};
+
+async function fetchAllMovements(accountId?: string): Promise<BankMovement[]> {
+  const all: BankMovement[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const result = await api.get<Paginated<BankMovement>>(
+      `/banks/movements${qs({ accountId, page, limit: 100 })}`
+    );
+
+    all.push(...result.data);
+
+    if (all.length >= result.meta.total || result.data.length === 0) break;
+  }
+
+  return all;
+}
+
 export default function Banks() {
-  const totalBalance = accounts.reduce(
-    (total, account) =>
-      total + account.balance,
-    0
-  );
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [movements, setMovements] = useState<BankMovement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [accountFilter, setAccountFilter] = useState("");
 
-  const totalIncome = accounts.reduce(
-    (total, account) =>
-      total + account.income,
-    0
-  );
+  // Modal nueva cuenta
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountForm, setAccountForm] = useState({
+    name: "",
+    bank: "",
+    accountNumber: "",
+  });
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
 
-  const totalExpenses = accounts.reduce(
-    (total, account) =>
-      total + account.expenses,
-    0
-  );
+  // Modal nuevo movimiento
+  const [movementOpen, setMovementOpen] = useState(false);
+  const [movementForm, setMovementForm] = useState({
+    accountId: "",
+    type: "ENTRADA" as BankMovementType,
+    amount: "",
+    concept: "",
+  });
+  const [savingMovement, setSavingMovement] = useState(false);
+  const [movementError, setMovementError] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    const [accountRows, movementRows] = await Promise.all([
+      api.get<BankAccount[]>("/banks/accounts?includeInactive=true"),
+      fetchAllMovements(accountFilter || undefined),
+    ]);
+
+    return { accounts: accountRows, movements: movementRows };
+  }, [accountFilter]);
+
+  const load = useCallback(() => {
+    return fetchAll()
+      .then((result) => {
+        setAccounts(result.accounts);
+        setMovements(result.movements);
+      })
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar las cuentas."
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [fetchAll]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const totalBalance = accounts
+    .filter((a) => a.isActive)
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  async function handleCreateAccount(event: FormEvent) {
+    event.preventDefault();
+    setAccountError(null);
+
+    if (!accountForm.name.trim() || !accountForm.bank.trim()) {
+      setAccountError("Indica el nombre y el banco.");
+      return;
+    }
+
+    setSavingAccount(true);
+
+    try {
+      await api.post("/banks/accounts", {
+        name: accountForm.name.trim(),
+        bank: accountForm.bank.trim(),
+        accountNumber: accountForm.accountNumber.trim() || null,
+      });
+
+      setAccountOpen(false);
+      setAccountForm({ name: "", bank: "", accountNumber: "" });
+      await load();
+    } catch (error) {
+      setAccountError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible crear la cuenta."
+      );
+    } finally {
+      setSavingAccount(false);
+    }
+  }
+
+  async function handleCreateMovement(event: FormEvent) {
+    event.preventDefault();
+    setMovementError(null);
+
+    const amount = Number(movementForm.amount);
+    if (!movementForm.accountId || !Number.isFinite(amount) || amount === 0) {
+      setMovementError("Selecciona la cuenta y pon un monto distinto de cero.");
+      return;
+    }
+
+    if (movementForm.type !== "AJUSTE" && amount < 0) {
+      setMovementError("Para entradas y salidas el monto es positivo.");
+      return;
+    }
+
+    setSavingMovement(true);
+
+    try {
+      await api.post("/banks/movements", {
+        accountId: movementForm.accountId,
+        type: movementForm.type,
+        amount,
+        concept: movementForm.concept.trim(),
+      });
+
+      setMovementOpen(false);
+      setMovementForm({ accountId: "", type: "ENTRADA", amount: "", concept: "" });
+      await load();
+    } catch (error) {
+      setMovementError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible registrar el movimiento."
+      );
+    } finally {
+      setSavingMovement(false);
+    }
+  }
+
+  const inputClass =
+    "w-full border border-stone-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-[#6F4E37]";
 
   return (
-    <div className="max-w-7xl mx-auto space-y-7">
-
-      {/* =========================================
-          ENCABEZADO
-      ========================================= */}
-
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-
+    <div className="space-y-8">
+      {/* ENCABEZADO */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
+          <h1 className="text-3xl sm:text-4xl font-bold text-stone-900">
+            Bancos
+          </h1>
 
-          <div className="flex items-center gap-3">
-
-            <div className="w-11 h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-              <Landmark size={21} />
-            </div>
-
-            <div>
-
-              <h1 className="text-3xl font-bold text-stone-900">
-                Bancos
-              </h1>
-
-              <p className="text-stone-500 mt-1">
-                Administra las cuentas y movimientos de Cheo's Café.
-              </p>
-
-            </div>
-
-          </div>
-
-        </div>
-
-        <button
-          type="button"
-          className="
-            w-full
-            sm:w-auto
-            flex
-            items-center
-            justify-center
-            gap-2
-            px-5
-            py-3
-            rounded-xl
-            bg-[#6F4E37]
-            hover:bg-[#5B3F2D]
-            text-white
-            font-semibold
-            transition
-          "
-        >
-          <Plus size={18} />
-          Nueva cuenta
-        </button>
-
-      </div>
-
-      {/* =========================================
-          RESUMEN
-      ========================================= */}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-
-        {/* SALDO TOTAL */}
-
-        <div className="sm:col-span-2 xl:col-span-1 bg-[#6F4E37] rounded-2xl p-5 sm:p-6 text-white">
-
-          <div className="flex items-center justify-between">
-
-            <div>
-
-              <p className="text-white/70 text-sm">
-                Saldo total
-              </p>
-
-              <p className="text-3xl sm:text-4xl font-bold mt-2">
-                {formatCurrency(
-                  totalBalance
-                )}
-              </p>
-
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
-              <Wallet size={21} />
-            </div>
-
-          </div>
-
-          <p className="text-sm text-white/70 mt-5">
-            Dinero disponible en todas las cuentas.
+          <p className="text-stone-500 mt-2">
+            Cuentas y movimientos (solo contador).
           </p>
-
         </div>
 
-        {/* INGRESOS */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setMovementError(null);
+              setMovementForm((f) => ({
+                ...f,
+                accountId: f.accountId || accounts[0]?.id || "",
+              }));
+              setMovementOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 border border-stone-300 bg-white hover:bg-stone-50 text-stone-700 px-5 py-3 rounded-xl font-semibold transition shrink-0"
+          >
+            <ArrowUpRight size={18} />
+            Movimiento
+          </button>
 
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6">
-
-          <div className="flex items-center justify-between">
-
-            <div>
-
-              <p className="text-sm text-stone-500">
-                Ingresos
-              </p>
-
-              <p className="text-2xl font-bold text-stone-900 mt-2">
-                {formatCurrency(
-                  totalIncome
-                )}
-              </p>
-
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-green-100 text-green-600 flex items-center justify-center">
-              <ArrowDownLeft size={21} />
-            </div>
-
-          </div>
-
-          <div className="flex items-center gap-2 mt-4 text-sm text-green-600 font-medium">
-
-            <TrendingUp size={16} />
-
-            <span>
-              Entradas registradas
-            </span>
-
-          </div>
-
+          <button
+            type="button"
+            onClick={() => {
+              setAccountError(null);
+              setAccountOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 bg-[#6F4E37] hover:bg-[#5B3F2D] text-white px-5 py-3 rounded-xl font-semibold transition shrink-0"
+          >
+            <Plus size={18} />
+            Nueva cuenta
+          </button>
         </div>
-
-        {/* EGRESOS */}
-
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6">
-
-          <div className="flex items-center justify-between">
-
-            <div>
-
-              <p className="text-sm text-stone-500">
-                Egresos
-              </p>
-
-              <p className="text-2xl font-bold text-stone-900 mt-2">
-                {formatCurrency(
-                  totalExpenses
-                )}
-              </p>
-
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
-              <ArrowUpRight size={21} />
-            </div>
-
-          </div>
-
-          <div className="flex items-center gap-2 mt-4 text-sm text-red-600 font-medium">
-
-            <TrendingDown size={16} />
-
-            <span>
-              Salidas registradas
-            </span>
-
-          </div>
-
-        </div>
-
       </div>
 
-      {/* =========================================
-          CUENTAS
-      ========================================= */}
+      {loading ? (
+        <div className="min-h-[40vh] flex flex-col items-center justify-center gap-3 text-[#6F4E37]">
+          <Loader2 size={26} className="animate-spin" />
 
-      <section>
+          <p className="text-sm font-medium">Cargando cuentas…</p>
+        </div>
+      ) : loadError ? (
+        <div className="min-h-[40vh] flex flex-col items-center justify-center gap-4">
+          <p className="text-sm text-red-600">{loadError}</p>
 
-        <div className="flex items-center justify-between mb-4">
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setLoadError(null);
+              void load();
+            }}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-[#6F4E37] hover:bg-[#5B3F2D] text-white text-sm font-semibold transition-colors"
+          >
+            <RotateCw size={16} />
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* SALDO TOTAL */}
+          <div className="bg-[#6F4E37] rounded-2xl p-5 sm:p-6 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white/70 text-sm">Saldo total</p>
 
-          <div>
+                <p className="text-3xl sm:text-4xl font-bold mt-2">
+                  {formatCurrency(totalBalance)}
+                </p>
+              </div>
 
-            <h2 className="text-xl font-bold text-stone-900">
-              Cuentas
-            </h2>
+              <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
+                <Wallet size={21} />
+              </div>
+            </div>
 
-            <p className="text-sm text-stone-500 mt-1">
-              Cuentas bancarias y digitales registradas.
+            <p className="text-sm text-white/70 mt-5">
+              Dinero disponible en todas las cuentas activas.
             </p>
-
           </div>
 
-          <span className="text-sm text-stone-500">
-            {accounts.length} cuentas
-          </span>
+          {/* CUENTAS */}
+          {accounts.length === 0 ? (
+            <div className="bg-white border border-stone-200 rounded-2xl shadow-sm py-14 text-center">
+              <Landmark size={32} className="mx-auto text-stone-300" />
 
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-
-          {accounts.map((account) => (
-
-            <div
-              key={account.id}
-              className="
-                bg-white
-                border
-                border-stone-200
-                rounded-2xl
-                p-5
-                shadow-sm
-                hover:shadow-md
-                transition
-              "
-            >
-
-              {/* BANCO */}
-
-              <div className="flex items-start justify-between gap-4">
-
-                <div className="flex items-center gap-3">
-
-                  <div className="w-11 h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-                    <Landmark size={20} />
-                  </div>
-
-                  <div>
-
-                    <p className="font-bold text-stone-900">
-                      {account.bank}
-                    </p>
-
-                    <p className="text-sm text-stone-500">
-                      {account.name}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <span className="text-xs bg-stone-100 text-stone-500 px-2.5 py-1 rounded-full">
-                  Activa
-                </span>
-
-              </div>
-
-              {/* SALDO */}
-
-              <div className="mt-6">
-
-                <p className="text-xs text-stone-500">
-                  Saldo disponible
-                </p>
-
-                <p className="text-2xl font-bold text-stone-900 mt-1">
-                  {formatCurrency(
-                    account.balance
-                  )}
-                </p>
-
-              </div>
-
-              {/* INFORMACIÓN */}
-
-              <div className="mt-5 pt-5 border-t border-stone-100">
-
-                <div className="flex items-center justify-between">
-
-                  <div>
-
-                    <p className="text-xs text-stone-400">
-                      Tipo
-                    </p>
-
-                    <p className="text-sm font-medium text-stone-700 mt-1">
-                      {account.type}
-                    </p>
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-xs text-stone-400">
-                      Cuenta
-                    </p>
-
-                    <p className="text-sm font-medium text-stone-700 mt-1">
-                      {account.number}
-                    </p>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* MOVIMIENTOS */}
-
-              <div className="grid grid-cols-2 gap-3 mt-5">
-
-                <div className="rounded-xl bg-green-50 p-3">
-
-                  <div className="flex items-center gap-1.5 text-green-600">
-
-                    <ArrowDownLeft size={15} />
-
-                    <span className="text-xs font-medium">
-                      Ingresos
-                    </span>
-
-                  </div>
-
-                  <p className="text-sm font-bold text-green-700 mt-1">
-                    {formatCurrency(
-                      account.income
-                    )}
-                  </p>
-
-                </div>
-
-                <div className="rounded-xl bg-red-50 p-3">
-
-                  <div className="flex items-center gap-1.5 text-red-600">
-
-                    <ArrowUpRight size={15} />
-
-                    <span className="text-xs font-medium">
-                      Egresos
-                    </span>
-
-                  </div>
-
-                  <p className="text-sm font-bold text-red-700 mt-1">
-                    {formatCurrency(
-                      account.expenses
-                    )}
-                  </p>
-
-                </div>
-
-              </div>
-
-              {/* BOTÓN */}
-
-              <button
-                type="button"
-                className="
-                  w-full
-                  mt-5
-                  py-3
-                  rounded-xl
-                  border
-                  border-stone-200
-                  text-stone-700
-                  font-semibold
-                  text-sm
-                  flex
-                  items-center
-                  justify-center
-                  gap-2
-                  hover:bg-stone-50
-                  transition
-                "
-              >
-                <Eye size={16} />
-                Ver movimientos
-              </button>
-
+              <p className="mt-4 text-sm text-stone-500">
+                No hay cuentas registradas. Crea la primera para empezar a
+                llevar los movimientos.
+              </p>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {accounts.map((account) => (
+                <div
+                  key={account.id}
+                  className={`bg-white border rounded-2xl p-5 sm:p-6 ${
+                    account.isActive
+                      ? "border-stone-200"
+                      : "border-stone-200 opacity-60"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-stone-900 truncate">
+                        {account.name}
+                      </p>
 
-          ))}
-
-        </div>
-
-      </section>
-
-      {/* =========================================
-          RESUMEN DE CUENTAS
-      ========================================= */}
-
-      <section className="bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
-
-        <div className="p-5 sm:p-6 border-b border-stone-200">
-
-          <h2 className="text-lg font-semibold text-stone-900">
-            Distribución del dinero
-          </h2>
-
-          <p className="text-sm text-stone-500 mt-1">
-            Así está distribuido el saldo entre tus cuentas.
-          </p>
-
-        </div>
-
-        <div className="p-5 sm:p-6 space-y-5">
-
-          {accounts.map((account) => {
-
-            const percentage =
-              totalBalance > 0
-                ? (account.balance /
-                    totalBalance) *
-                  100
-                : 0;
-
-            return (
-              <div key={account.id}>
-
-                <div className="flex items-center justify-between gap-4 mb-2">
-
-                  <div className="flex items-center gap-2">
-
-                    <div className="w-8 h-8 rounded-lg bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-                      <Landmark size={15} />
+                      <p className="text-sm text-stone-500 mt-0.5 truncate">
+                        {account.bank}
+                        {account.accountNumber &&
+                          ` · ${account.accountNumber}`}
+                      </p>
                     </div>
 
-                    <span className="text-sm font-medium text-stone-700">
-                      {account.bank} · {account.name}
-                    </span>
-
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        account.balance >= 0
+                          ? "bg-emerald-50 text-emerald-600"
+                          : "bg-red-50 text-red-600"
+                      }`}
+                    >
+                      <Landmark size={18} />
+                    </div>
                   </div>
 
-                  <span className="text-sm font-semibold text-stone-800">
-                    {percentage.toFixed(1)}%
-                  </span>
+                  <p
+                    className={`text-2xl font-bold mt-4 ${
+                      account.balance >= 0 ? "text-stone-900" : "text-red-600"
+                    }`}
+                  >
+                    {formatCurrency(account.balance)}
+                  </p>
 
+                  {!account.isActive && (
+                    <p className="text-xs text-stone-400 mt-2">Inactiva</p>
+                  )}
                 </div>
+              ))}
+            </div>
+          )}
 
-                <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+          {/* FILTRO POR CUENTA */}
+          <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-4">
+            <Select
+              value={accountFilter}
+              onChange={(value) => setAccountFilter(value)}
+              aria-label="Filtrar por cuenta"
+              options={[
+                {
+                  value: "",
+                  label: "Todas las cuentas",
+                  icon: SlidersHorizontal,
+                },
+                ...accounts.map((account) => ({
+                  value: account.id,
+                  label: `${account.name} · ${account.bank}`,
+                  icon: Landmark,
+                })),
+              ]}
+            />
+          </div>
 
-                  <div
-                    className="h-full bg-[#8B6B52] rounded-full"
-                    style={{
-                      width: `${percentage}%`,
-                    }}
-                  />
+          {/* MOVIMIENTOS */}
+          <div className="bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-stone-200">
+              <h2 className="text-lg font-bold text-stone-900">Movimientos</h2>
+            </div>
 
-                </div>
-
+            {movements.length === 0 ? (
+              <div className="py-12 text-center text-sm text-stone-400">
+                Sin movimientos registrados.
               </div>
-            );
-          })}
+            ) : (
+              <div className="divide-y divide-stone-100">
+                {movements.map((movement) => (
+                  <div
+                    key={movement.id}
+                    className="px-6 py-4 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          movement.type === "ENTRADA"
+                            ? "bg-emerald-50 text-emerald-600"
+                            : movement.type === "SALIDA"
+                              ? "bg-red-50 text-red-600"
+                              : "bg-stone-100 text-stone-500"
+                        }`}
+                      >
+                        {movement.type === "ENTRADA" ? (
+                          <ArrowDownLeft size={18} />
+                        ) : movement.type === "SALIDA" ? (
+                          <ArrowUpRight size={18} />
+                        ) : (
+                          <Minus size={18} />
+                        )}
+                      </div>
 
-        </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-stone-800 truncate">
+                          {movement.concept}
+                        </p>
 
-      </section>
+                        <p className="text-xs text-stone-400 mt-0.5">
+                          {movement.account} · {MOVEMENT_LABELS[movement.type]}{" "}
+                          · {formatDate(movement.date)}
+                        </p>
+                      </div>
+                    </div>
 
+                    <p
+                      className={`text-sm font-bold whitespace-nowrap ${
+                        movement.type === "ENTRADA"
+                          ? "text-emerald-600"
+                          : movement.type === "SALIDA"
+                            ? "text-red-600"
+                            : "text-stone-600"
+                      }`}
+                    >
+                      {movement.type === "ENTRADA"
+                        ? "+"
+                        : movement.type === "SALIDA"
+                          ? "−"
+                          : ""}
+                      {formatCurrency(Math.abs(movement.amount))}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ------------------------------------------------------
+          MODAL: NUEVA CUENTA
+      ------------------------------------------------------ */}
+      {accountOpen && (
+        <Modal
+          icon={Landmark}
+          title="Nueva cuenta"
+          onClose={() => setAccountOpen(false)}
+          onSubmit={(event) => void handleCreateAccount(event)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setAccountOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-stone-600 hover:bg-stone-200 transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={savingAccount}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#6F4E37] hover:bg-[#5B3F2D] text-white disabled:opacity-60 transition-colors"
+              >
+                {savingAccount ? "Creando…" : "Crear cuenta"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {accountError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {accountError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Nombre *
+              </label>
+
+              <input
+                type="text"
+                required
+                placeholder="Ej. Caja chica, Bancolombia ahorros…"
+                value={accountForm.name}
+                onChange={(event) =>
+                  setAccountForm({ ...accountForm, name: event.target.value })
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Banco / entidad *
+              </label>
+
+              <input
+                type="text"
+                required
+                placeholder="Ej. Bancolombia, Nequi, Efectivo…"
+                value={accountForm.bank}
+                onChange={(event) =>
+                  setAccountForm({ ...accountForm, bank: event.target.value })
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Número de cuenta
+              </label>
+
+              <input
+                type="text"
+                placeholder="Opcional…"
+                value={accountForm.accountNumber}
+                onChange={(event) =>
+                  setAccountForm({
+                    ...accountForm,
+                    accountNumber: event.target.value,
+                  })
+                }
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ------------------------------------------------------
+          MODAL: NUEVO MOVIMIENTO
+      ------------------------------------------------------ */}
+      {movementOpen && (
+        <Modal
+          icon={ArrowDownLeft}
+          title="Nuevo movimiento"
+          subtitle="El saldo de la cuenta se actualiza al guardar."
+          onClose={() => setMovementOpen(false)}
+          onSubmit={(event) => void handleCreateMovement(event)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setMovementOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-stone-600 hover:bg-stone-200 transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={savingMovement}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#6F4E37] hover:bg-[#5B3F2D] text-white disabled:opacity-60 transition-colors"
+              >
+                {savingMovement ? "Guardando…" : "Registrar"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {movementError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {movementError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Cuenta *
+              </label>
+
+              <Select
+                value={movementForm.accountId}
+                onChange={(value) =>
+                  setMovementForm({
+                    ...movementForm,
+                    accountId: value,
+                  })
+                }
+                placeholder="Seleccionar cuenta…"
+                aria-label="Cuenta"
+                options={accounts
+                  .filter((a) => a.isActive)
+                  .map((account) => ({
+                    value: account.id,
+                    label: `${account.name} · ${account.bank} (saldo ${formatCurrency(
+                      account.balance
+                    )})`,
+                    icon: Landmark,
+                  }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Tipo *
+                </label>
+
+                <Select
+                  value={movementForm.type}
+                  onChange={(value) =>
+                    setMovementForm({
+                      ...movementForm,
+                      type: value as BankMovementType,
+                    })
+                  }
+                  aria-label="Tipo de movimiento"
+                  options={[
+                    {
+                      value: "ENTRADA",
+                      label: "Entrada",
+                      icon: ArrowDownLeft,
+                    },
+                    { value: "SALIDA", label: "Salida", icon: ArrowUpRight },
+                    { value: "AJUSTE", label: "Ajuste (puede ser negativo)", icon: Minus },
+                  ]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Monto *
+                </label>
+
+                <input
+                  type="number"
+                  required
+                  step="any"
+                  placeholder="50000"
+                  value={movementForm.amount}
+                  onChange={(event) =>
+                    setMovementForm({
+                      ...movementForm,
+                      amount: event.target.value,
+                    })
+                  }
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Concepto *
+              </label>
+
+              <input
+                type="text"
+                required
+                placeholder="Ej. Abono factura F-000002"
+                value={movementForm.concept}
+                onChange={(event) =>
+                  setMovementForm({
+                    ...movementForm,
+                    concept: event.target.value,
+                  })
+                }
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

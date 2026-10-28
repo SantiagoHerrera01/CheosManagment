@@ -1,11 +1,37 @@
-import { CalendarDays, Search, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Clock3,
+  Search,
+  SlidersHorizontal,
+} from "lucide-react";
 
-export default function SalesFilters() {
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("Todos");
-  const [date, setDate] = useState("Todas");
+import Select from "../ui/Select";
+import DateRangePicker from "../ui/DateRangePicker";
 
+export type SalesFilterValues = {
+  q: string;
+  status: string;
+  from: string;
+  to: string;
+};
+
+type SalesFiltersProps = {
+  q: string;
+  status: string;
+  from: string;
+  to: string;
+  onChange: (filters: SalesFilterValues) => void;
+};
+
+export default function SalesFilters({
+  q,
+  status,
+  from,
+  to,
+  onChange,
+}: SalesFiltersProps) {
   return (
     <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-5">
 
@@ -22,10 +48,11 @@ export default function SalesFilters() {
 
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
 
         {/* BUSCADOR */}
-        <div className="relative">
+
+        <div className="relative col-span-2 lg:col-span-1">
 
           <Search
             size={18}
@@ -40,9 +67,14 @@ export default function SalesFilters() {
 
           <input
             type="text"
-            value={search}
+            value={q}
             onChange={(event) =>
-              setSearch(event.target.value)
+              onChange({
+                q: event.target.value,
+                status,
+                from,
+                to,
+              })
             }
             placeholder="Buscar por factura o cliente..."
             className="
@@ -63,94 +95,41 @@ export default function SalesFilters() {
         </div>
 
         {/* ESTADO */}
-        <select
+
+        <Select
           value={status}
-          onChange={(event) =>
-            setStatus(event.target.value)
+          onChange={(value) =>
+            onChange({
+              q,
+              status: value,
+              from,
+              to,
+            })
           }
-          className="
-            w-full
-            border
-            border-stone-300
-            rounded-xl
-            px-4
-            py-3
-            bg-white
-            outline-none
-            focus:border-[#6F4E37]
-          "
-        >
-          <option value="Todos">
-            Todos los estados
-          </option>
+          aria-label="Estado de la factura"
+          options={[
+            { value: "", label: "Todas", icon: SlidersHorizontal },
+            { value: "PENDIENTE", label: "Pendientes", icon: Clock3 },
+            { value: "PAGADA", label: "Pagadas", icon: CheckCircle2 },
+            { value: "VENCIDA", label: "Vencidas", icon: AlertTriangle },
+            { value: "ANULADA", label: "Anuladas", icon: Ban },
+          ]}
+        />
 
-          <option value="Pagada">
-            Pagadas
-          </option>
+        {/* RANGO DE FECHAS */}
 
-          <option value="Pendiente">
-            Pendientes
-          </option>
-
-          <option value="Anulada">
-            Anuladas
-          </option>
-        </select>
-
-        {/* FECHA */}
-        <div className="relative">
-
-          <CalendarDays
-            size={18}
-            className="
-              absolute
-              left-4
-              top-1/2
-              -translate-y-1/2
-              text-stone-400
-            "
-          />
-
-          <select
-            value={date}
-            onChange={(event) =>
-              setDate(event.target.value)
-            }
-            className="
-              w-full
-              border
-              border-stone-300
-              rounded-xl
-              pl-11
-              pr-4
-              py-3
-              bg-white
-              outline-none
-              focus:border-[#6F4E37]
-            "
-          >
-            <option value="Todas">
-              Todas las fechas
-            </option>
-
-            <option value="Hoy">
-              Hoy
-            </option>
-
-            <option value="7">
-              Últimos 7 días
-            </option>
-
-            <option value="30">
-              Últimos 30 días
-            </option>
-
-            <option value="Mes">
-              Este mes
-            </option>
-          </select>
-
-        </div>
+        <DateRangePicker
+          value={{ from, to }}
+          onChange={(range) =>
+            onChange({
+              q,
+              status,
+              from: range.from,
+              to: range.to,
+            })
+          }
+          aria-label="Rango de fechas"
+        />
 
       </div>
 

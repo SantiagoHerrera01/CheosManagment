@@ -4,137 +4,41 @@ import {
   Minus,
   Trash2,
   Package,
-  ChevronDown,
+  Loader2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Presentation = {
-  size: string;
-  cost: number;
-  wholesale: number;
-  retail: number | null;
-};
+import { api, ApiError, qs } from "../../lib/api";
+import type { Grind, Paginated, Product } from "../../types/api";
 
-type CatalogProduct = {
-  id: number;
-  name: string;
-  process: string;
-  presentations: Presentation[];
-  types: string[];
-};
-
-type CartItem = {
+export type CartItem = {
   id: string;
-  productId: number;
-  name: string;
-  size: string;
-  type: string;
+  presentationId: string;
+  productName: string;
+  presentationLabel: string;
   price: number;
-  cost: number;
   quantity: number;
 };
 
-const catalog: CatalogProduct[] = [
-  {
-    id: 1,
-    name: "Castillo",
-    process: "Suave lavado",
-    presentations: [
-      {
-        size: "125 g",
-        cost: 8036,
-        wholesale: 12900,
-        retail: 19900,
-      },
-      {
-        size: "250 g",
-        cost: 13552,
-        wholesale: 19900,
-        retail: 28000,
-      },
-      {
-        size: "500 g",
-        cost: 23995,
-        wholesale: 30000,
-        retail: 40000,
-      },
-      {
-        size: "2.5 kg",
-        cost: 108250,
-        wholesale: 140000,
-        retail: null,
-      },
-    ],
-    types: ["Molido", "Grano"],
-  },
-  {
-    id: 2,
-    name: "Chiroso Urrao",
-    process: "Exótico",
-    presentations: [
-      {
-        size: "125 g",
-        cost: 12250,
-        wholesale: 17900,
-        retail: 24000,
-      },
-      {
-        size: "250 g",
-        cost: 20750,
-        wholesale: 28900,
-        retail: 35000,
-      },
-    ],
-    types: ["Molido", "Grano"],
-  },
-  {
-    id: 3,
-    name: "Papayo Honey",
-    process: "Honey",
-    presentations: [
-      {
-        size: "250 g",
-        cost: 18250,
-        wholesale: 27900,
-        retail: 35000,
-      },
-    ],
-    types: ["Molido", "Grano"],
-  },
-  {
-    id: 4,
-    name: "Bourbon Rosado Honey",
-    process: "Honey",
-    presentations: [
-      {
-        size: "250 g",
-        cost: 26450,
-        wholesale: 35900,
-        retail: 40000,
-      },
-    ],
-    types: ["Molido", "Grano"],
-  },
-  {
-    id: 5,
-    name: "Natural Melaza de Caña",
-    process: "Natural",
-    presentations: [
-      {
-        size: "250 g",
-        cost: 26450,
-        wholesale: 35900,
-        retail: 40000,
-      },
-    ],
-    types: ["Molido", "Grano"],
-  },
-];
+type CatalogOption = {
+  presentationId: string;
+  productName: string;
+  productVariety: string | null;
+  productProcess: string | null;
+  label: string;
+  grind: Grind;
+  price: number;
+  stock: number;
+};
 
 type SaleProductsProps = {
   items: CartItem[];
   onItemsChange: (items: CartItem[]) => void;
 };
+
+function grindLabel(grind: Grind) {
+  return grind === "GRANO" ? "Grano" : "Molido";
+}
 
 function formatCurrency(value: number) {
   return value.toLocaleString("es-CO", {
@@ -144,52 +48,136 @@ function formatCurrency(value: number) {
   });
 }
 
+/** Aplana el catálogo: cada opción del selector es un producto + presentación. */
+function flattenCatalog(products: Product[]): CatalogOption[] {
+  return products.flatMap((product) =>
+    product.presentations
+      .filter((presentation) => presentation.isActive)
+      .map((presentation) => ({
+        presentationId: presentation.id,
+        productName: product.name,
+        productVariety: product.variety,
+        productProcess: product.process,
+        label: presentation.label,
+        grind: presentation.grind,
+        price: presentation.price,
+        stock: presentation.stock,
+      }))
+  );
+}
+
 export default function SaleProducts({
   items,
   onItemsChange,
 }: SaleProductsProps) {
+  const [options, setOptions] = useState<CatalogOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
-  const [selectedProduct, setSelectedProduct] =
-    useState<CatalogProduct | null>(null);
+  const [selectedOption, setSelectedOption] =
+    useState<CatalogOption | null>(null);
 
-  const [selectedSize, setSelectedSize] = useState("");
-  const [selectedType, setSelectedType] = useState("Molido");
+  /** Descarga y aplana el catálogo (sin tocar estado). */
+  const fetchCatalog = useCallback(async () => {
+    const all: Product[] = [];
 
-  const filteredProducts = useMemo(() => {
+    // El backend limita a 100 por página: recorremos todas las páginas.
+    // Solo se vende producto TERMINADO (R5): la materia prima e insumos
+    // no aparecen en el punto de venta.
+    for (let page = 1; ; page += 1) {
+      const result = await api.get<Paginated<Product>>(
+        `/products${qs({ active: true, category: "TERMINADO", page, limit: 100 })}`
+      );
+
+      all.push(...result.data);
+
+      if (all.length >= result.meta.total || result.data.length === 0) {
+        break;
+      }
+    }
+
+    return flattenCatalog(all);
+  }, []);
+
+  const loadCatalog = useCallback(() => {
+    return fetchCatalog()
+      .then((options) => {
+        setOptions(options);
+      })
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar los productos."
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [fetchCatalog]);
+
+  useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
+
+  /** Las presentaciones sin stock no aparecen en el selector. */
+  const availableOptions = useMemo(
+    () => options.filter((option) => option.stock > 0),
+    [options]
+  );
+
+  const filteredOptions = useMemo(() => {
     const value = search.toLowerCase().trim();
 
     if (!value) {
-      return catalog;
+      return availableOptions;
     }
 
-    return catalog.filter(
-      (product) =>
-        product.name.toLowerCase().includes(value) ||
-        product.process.toLowerCase().includes(value)
+    return availableOptions.filter(
+      (option) =>
+        option.productName.toLowerCase().includes(value) ||
+        (option.productVariety ?? "").toLowerCase().includes(value) ||
+        (option.productProcess ?? "").toLowerCase().includes(value) ||
+        option.label.toLowerCase().includes(value)
     );
-  }, [search]);
+  }, [availableOptions, search]);
 
-  const selectedPresentation = selectedProduct?.presentations.find(
-    (presentation) => presentation.size === selectedSize
-  );
+  const stockOf = (presentationId: string) =>
+    options.find(
+      (option) => option.presentationId === presentationId
+    )?.stock ?? 0;
 
-  const price = selectedPresentation?.retail ?? 0;
+  const selectedStock = selectedOption
+    ? stockOf(selectedOption.presentationId)
+    : 0;
+
+  const selectedInCart = selectedOption
+    ? items.find(
+        (item) =>
+          item.presentationId === selectedOption.presentationId
+      )?.quantity ?? 0
+    : 0;
 
   const addProduct = () => {
-    if (!selectedProduct || !selectedPresentation || price <= 0) {
+    if (!selectedOption) {
       return;
     }
 
-    const itemId = `${selectedProduct.id}-${selectedPresentation.size}-${selectedType}`;
+    const option = selectedOption;
+
+    if (selectedInCart >= stockOf(option.presentationId)) {
+      return;
+    }
 
     const existingItem = items.find(
-      (item) => item.id === itemId
+      (item) => item.presentationId === option.presentationId
     );
 
     if (existingItem) {
       onItemsChange(
         items.map((item) =>
-          item.id === itemId
+          item.presentationId === option.presentationId
             ? {
                 ...item,
                 quantity: item.quantity + 1,
@@ -201,27 +189,26 @@ export default function SaleProducts({
       onItemsChange([
         ...items,
         {
-          id: itemId,
-          productId: selectedProduct.id,
-          name: selectedProduct.name,
-          size: selectedPresentation.size,
-          type: selectedType,
-          price,
-          cost: selectedPresentation.cost,
+          id: option.presentationId,
+          presentationId: option.presentationId,
+          productName: option.productName,
+          presentationLabel: `${option.label} · ${grindLabel(option.grind)}`,
+          price: option.price,
           quantity: 1,
         },
       ]);
     }
 
-    setSelectedProduct(null);
-    setSelectedSize("");
+    setSelectedOption(null);
     setSearch("");
   };
 
   const increaseQuantity = (id: string) => {
+    const stock = stockOf(id);
+
     onItemsChange(
       items.map((item) =>
-        item.id === id
+        item.id === id && item.quantity < stock
           ? {
               ...item,
               quantity: item.quantity + 1,
@@ -299,7 +286,7 @@ export default function SaleProducts({
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
-              setSelectedProduct(null);
+              setSelectedOption(null);
             }}
             placeholder="Buscar producto..."
             className="
@@ -319,70 +306,153 @@ export default function SaleProducts({
 
         </div>
 
+        {/* CARGANDO CATÁLOGO */}
+        {loading && (
+
+          <div
+            className="
+              border
+              border-stone-200
+              rounded-xl
+              p-6
+              text-center
+            "
+          >
+
+            <Loader2
+              size={26}
+              className="mx-auto text-[#6F4E37] animate-spin"
+            />
+
+            <p className="mt-3 text-sm text-stone-500">
+              Cargando productos…
+            </p>
+
+          </div>
+
+        )}
+
+        {/* ERROR AL CARGAR CATÁLOGO */}
+        {!loading && loadError && (
+
+          <div
+            className="
+              bg-red-50
+              border
+              border-red-200
+              text-red-700
+              text-sm
+              rounded-xl
+              px-4
+              py-3
+              flex
+              items-center
+              justify-between
+              gap-3
+            "
+          >
+
+            <span>{loadError}</span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setLoadError(null);
+                void loadCatalog();
+              }}
+              className="font-semibold underline shrink-0"
+            >
+              Reintentar
+            </button>
+
+          </div>
+
+        )}
+
         {/* RESULTADOS */}
-        {search.trim() !== "" && !selectedProduct && (
+        {!loading &&
+          !loadError &&
+          search.trim() !== "" &&
+          !selectedOption && (
+
           <div className="border border-stone-200 rounded-xl overflow-hidden">
 
-            {filteredProducts.map((product) => (
+            {filteredOptions.map((option) => {
 
-              <button
-                key={product.id}
-                type="button"
-                onClick={() => {
-                  setSelectedProduct(product);
-                  setSelectedSize(
-                    product.presentations[0]?.size ?? ""
-                  );
-                  setSelectedType(
-                    product.types[0] ?? "Molido"
-                  );
-                }}
-                className="
-                  w-full
-                  text-left
-                  flex
-                  items-center
-                  justify-between
-                  gap-4
-                  px-4
-                  py-4
-                  border-b
-                  last:border-b-0
-                  border-stone-100
-                  hover:bg-stone-50
-                  transition
-                "
-              >
+              const meta = [option.productVariety, option.productProcess]
+                .filter(Boolean)
+                .join(" · ");
 
-                <div>
-                  <p className="font-semibold text-stone-800">
-                    {product.name}
-                  </p>
+              return (
 
-                  <p className="text-sm text-stone-500 mt-1">
-                    {product.process}
-                  </p>
-                </div>
+                <button
+                  key={option.presentationId}
+                  type="button"
+                  onClick={() => setSelectedOption(option)}
+                  className="
+                    w-full
+                    text-left
+                    flex
+                    items-center
+                    justify-between
+                    gap-4
+                    px-4
+                    py-4
+                    border-b
+                    last:border-b-0
+                    border-stone-100
+                    hover:bg-stone-50
+                    transition
+                  "
+                >
 
-                <span className="text-sm text-[#6F4E37] font-semibold">
-                  {product.presentations.length} presentaciones
-                </span>
+                  <div>
+                    <p className="font-semibold text-stone-800">
+                      {option.productName}
+                    </p>
 
-              </button>
+                    <p className="text-sm text-stone-500 mt-1">
+                      {option.label} · {grindLabel(option.grind)}
+                    </p>
 
-            ))}
+                    {meta && (
+                      <p className="text-xs text-stone-400 mt-1">
+                        {meta}
+                      </p>
+                    )}
+                  </div>
 
-            {filteredProducts.length === 0 && (
+                  <div className="text-right shrink-0">
+
+                    <span className="text-sm text-[#6F4E37] font-semibold">
+                      {formatCurrency(option.price)}
+                    </span>
+
+                    <p className="text-xs text-stone-400 mt-1">
+                      stock {option.stock}
+                    </p>
+
+                  </div>
+
+                </button>
+
+              );
+
+            })}
+
+            {filteredOptions.length === 0 && (
               <div className="p-5 text-center text-stone-500">
                 No encontramos ese producto.
               </div>
             )}
 
           </div>
+
         )}
 
         {/* CONFIGURAR PRODUCTO */}
-        {selectedProduct && (
+        {selectedOption && (
 
           <div className="border border-[#D9C8BB] bg-[#FAF7F4] rounded-xl p-4 sm:p-5">
 
@@ -390,17 +460,17 @@ export default function SaleProducts({
 
               <div>
                 <p className="font-bold text-stone-900">
-                  {selectedProduct.name}
+                  {selectedOption.productName}
                 </p>
 
                 <p className="text-sm text-stone-500 mt-1">
-                  {selectedProduct.process}
+                  {selectedOption.label} · {grindLabel(selectedOption.grind)}
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => setSelectedProduct(null)}
+                onClick={() => setSelectedOption(null)}
                 className="text-sm text-stone-500 hover:text-stone-800"
               >
                 Cancelar
@@ -417,88 +487,45 @@ export default function SaleProducts({
                   Presentación
                 </label>
 
-                <div className="relative">
-
-                  <select
-                    value={selectedSize}
-                    onChange={(event) =>
-                      setSelectedSize(event.target.value)
-                    }
-                    className="
-                      w-full
-                      appearance-none
-                      border
-                      border-stone-300
-                      rounded-xl
-                      bg-white
-                      px-4
-                      py-3
-                      pr-10
-                      outline-none
-                      focus:border-[#6F4E37]
-                    "
-                  >
-                    {selectedProduct.presentations.map(
-                      (presentation) => (
-                        <option
-                          key={presentation.size}
-                          value={presentation.size}
-                        >
-                          {presentation.size}
-                        </option>
-                      )
-                    )}
-                  </select>
-
-                  <ChevronDown
-                    size={18}
-                    className="
-                      absolute
-                      right-3
-                      top-1/2
-                      -translate-y-1/2
-                      pointer-events-none
-                      text-stone-400
-                    "
-                  />
-
+                <div
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    bg-white
+                    px-4
+                    py-3
+                    text-stone-800
+                    font-medium
+                  "
+                >
+                  {selectedOption.label} · {grindLabel(selectedOption.grind)}
                 </div>
 
               </div>
 
-              {/* TIPO */}
+              {/* STOCK */}
               <div>
 
                 <label className="block text-sm font-semibold text-stone-700 mb-2">
-                  Tipo
+                  Stock disponible
                 </label>
 
-                <div className="grid grid-cols-2 gap-2">
-
-                  {selectedProduct.types.map((type) => (
-
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setSelectedType(type)}
-                      className={`
-                        py-3
-                        rounded-xl
-                        border
-                        font-medium
-                        transition
-                        ${
-                          selectedType === type
-                            ? "border-[#6F4E37] bg-[#6F4E37] text-white"
-                            : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
-                        }
-                      `}
-                    >
-                      {type}
-                    </button>
-
-                  ))}
-
+                <div
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    bg-white
+                    px-4
+                    py-3
+                    text-stone-800
+                    font-medium
+                  "
+                >
+                  {selectedStock} unidades
                 </div>
 
               </div>
@@ -515,12 +542,7 @@ export default function SaleProducts({
                 </p>
 
                 <p className="text-2xl font-bold text-[#6F4E37] mt-1">
-                  {selectedPresentation
-                    ? formatCurrency(
-                        selectedPresentation.retail ??
-                          selectedPresentation.wholesale
-                      )
-                    : "$0"}
+                  {formatCurrency(selectedOption.price)}
                 </p>
 
               </div>
@@ -528,7 +550,7 @@ export default function SaleProducts({
               <button
                 type="button"
                 onClick={addProduct}
-                disabled={!selectedPresentation}
+                disabled={selectedInCart >= selectedStock}
                 className="
                   flex
                   items-center
@@ -547,12 +569,22 @@ export default function SaleProducts({
                 "
               >
                 <Plus size={19} />
-                Agregar producto
+                {selectedInCart >= selectedStock
+                  ? "Máximo en el carrito"
+                  : "Agregar producto"}
               </button>
 
             </div>
 
+            {selectedInCart >= selectedStock && (
+              <p className="text-sm text-red-500 mt-3">
+                Solo hay {selectedStock} unidades disponibles
+                de esta presentación.
+              </p>
+            )}
+
           </div>
+
         )}
 
         {/* CARRITO */}
@@ -584,124 +616,137 @@ export default function SaleProducts({
 
             <div className="space-y-3">
 
-              {items.map((item) => (
+              {items.map((item) => {
 
-                <div
-                  key={item.id}
-                  className="
-                    border
-                    border-stone-200
-                    rounded-xl
-                    p-4
-                    flex
-                    flex-col
-                    sm:flex-row
-                    sm:items-center
-                    gap-4
-                  "
-                >
+                const stock = stockOf(item.presentationId);
 
-                  <div className="flex-1 min-w-0">
+                return (
 
-                    <p className="font-semibold text-stone-900">
-                      {item.name}
-                    </p>
-
-                    <p className="text-sm text-stone-500 mt-1">
-                      {item.size} · {item.type}
-                    </p>
-
-                    <p className="text-sm font-semibold text-[#6F4E37] mt-2">
-                      {formatCurrency(item.price)} unidad
-                    </p>
-
-                  </div>
-
-                  {/* CANTIDAD */}
-                  <div className="flex items-center gap-3">
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        decreaseQuantity(item.id)
-                      }
-                      className="
-                        w-9
-                        h-9
-                        rounded-lg
-                        border
-                        border-stone-300
-                        flex
-                        items-center
-                        justify-center
-                        hover:bg-stone-50
-                      "
-                    >
-                      <Minus size={16} />
-                    </button>
-
-                    <span className="w-6 text-center font-semibold">
-                      {item.quantity}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        increaseQuantity(item.id)
-                      }
-                      className="
-                        w-9
-                        h-9
-                        rounded-lg
-                        border
-                        border-stone-300
-                        flex
-                        items-center
-                        justify-center
-                        hover:bg-stone-50
-                      "
-                    >
-                      <Plus size={16} />
-                    </button>
-
-                  </div>
-
-                  {/* TOTAL */}
-                  <div className="sm:w-32 sm:text-right">
-
-                    <p className="text-xs text-stone-400">
-                      Total
-                    </p>
-
-                    <p className="font-bold text-stone-900">
-                      {formatCurrency(
-                        item.price * item.quantity
-                      )}
-                    </p>
-
-                  </div>
-
-                  {/* ELIMINAR */}
-                  <button
-                    type="button"
-                    onClick={() => removeItem(item.id)}
+                  <div
+                    key={item.id}
                     className="
-                      w-9
-                      h-9
-                      rounded-lg
+                      border
+                      border-stone-200
+                      rounded-xl
+                      p-4
                       flex
-                      items-center
-                      justify-center
-                      text-red-500
-                      hover:bg-red-50
+                      flex-col
+                      sm:flex-row
+                      sm:items-center
+                      gap-4
                     "
                   >
-                    <Trash2 size={18} />
-                  </button>
 
-                </div>
+                    <div className="flex-1 min-w-0">
 
-              ))}
+                      <p className="font-semibold text-stone-900">
+                        {item.productName}
+                      </p>
+
+                      <p className="text-sm text-stone-500 mt-1">
+                        {item.presentationLabel}
+                      </p>
+
+                      <p className="text-sm font-semibold text-[#6F4E37] mt-2">
+                        {formatCurrency(item.price)} unidad
+                      </p>
+
+                    </div>
+
+                    {/* CANTIDAD */}
+                    <div className="flex items-center gap-3">
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          decreaseQuantity(item.id)
+                        }
+                        className="
+                          w-9
+                          h-9
+                          rounded-lg
+                          border
+                          border-stone-300
+                          flex
+                          items-center
+                          justify-center
+                          hover:bg-stone-50
+                        "
+                      >
+                        <Minus size={16} />
+                      </button>
+
+                      <span className="w-6 text-center font-semibold">
+                        {item.quantity}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          increaseQuantity(item.id)
+                        }
+                        disabled={item.quantity >= stock}
+                        className="
+                          w-9
+                          h-9
+                          rounded-lg
+                          border
+                          border-stone-300
+                          flex
+                          items-center
+                          justify-center
+                          hover:bg-stone-50
+                          disabled:opacity-40
+                          disabled:cursor-not-allowed
+                        "
+                      >
+                        <Plus size={16} />
+                      </button>
+
+                      <span className="text-xs text-stone-400">
+                        stock {stock}
+                      </span>
+
+                    </div>
+
+                    {/* TOTAL */}
+                    <div className="sm:w-32 sm:text-right">
+
+                      <p className="text-xs text-stone-400">
+                        Total
+                      </p>
+
+                      <p className="font-bold text-stone-900">
+                        {formatCurrency(
+                          item.price * item.quantity
+                        )}
+                      </p>
+
+                    </div>
+
+                    {/* ELIMINAR */}
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.id)}
+                      className="
+                        w-9
+                        h-9
+                        rounded-lg
+                        flex
+                        items-center
+                        justify-center
+                        text-red-500
+                        hover:bg-red-50
+                      "
+                    >
+                      <Trash2 size={18} />
+                    </button>
+
+                  </div>
+
+                );
+
+              })}
 
             </div>
 

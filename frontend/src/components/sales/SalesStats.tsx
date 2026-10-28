@@ -2,39 +2,88 @@ import {
   CircleDollarSign,
   ShoppingCart,
   Clock3,
-  TrendingUp,
+  AlertTriangle,
 } from "lucide-react";
 
-const stats = [
-  {
-    title: "Ventas de hoy",
-    value: "$1.250.000",
-    description: "8 ventas registradas",
-    icon: CircleDollarSign,
-  },
-  {
-    title: "Ventas del mes",
-    value: "$18.450.000",
-    description: "124 ventas registradas",
-    icon: ShoppingCart,
-  },
-  {
-    title: "Pendiente de cobro",
-    value: "$2.350.000",
-    description: "12 ventas a crédito",
-    icon: Clock3,
-  },
-  {
-    title: "Ganancia estimada",
-    value: "$6.820.000",
-    description: "Margen aproximado",
-    icon: TrendingUp,
-  },
-];
+import type { Invoice } from "../../types/api";
 
-export default function SalesStats() {
+type SalesStatsProps = {
+  invoices: Invoice[];
+};
+
+function formatCurrency(value: number) {
+  return value.toLocaleString("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  });
+}
+
+function isToday(iso: string) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+    new Date(iso).toLocaleDateString("es-CO") ===
+    new Date().toLocaleDateString("es-CO")
+  );
+}
+
+export default function SalesStats({
+  invoices,
+}: SalesStatsProps) {
+  const todaySales = invoices.filter(
+    (invoice) =>
+      invoice.status !== "ANULADA" &&
+      isToday(invoice.issueDate)
+  );
+
+  const todayTotal = todaySales.reduce(
+    (total, invoice) => total + invoice.total,
+    0
+  );
+
+  const openInvoices = invoices.filter(
+    (invoice) =>
+      invoice.status === "PENDIENTE" ||
+      invoice.status === "VENCIDA"
+  );
+
+  const pendingTotal = openInvoices.reduce(
+    (total, invoice) => total + invoice.balance,
+    0
+  );
+
+  const overdueCount = invoices.filter(
+    (invoice) => invoice.status === "VENCIDA"
+  ).length;
+
+  const stats = [
+    {
+      title: "Ventas de hoy",
+      value: formatCurrency(todayTotal),
+      description: "Facturado hoy (sin anuladas)",
+      icon: CircleDollarSign,
+    },
+    {
+      title: "Facturas de hoy",
+      value: String(todaySales.length),
+      description: "Ventas emitidas hoy",
+      icon: ShoppingCart,
+    },
+    {
+      title: "Pendiente por cobrar",
+      value: formatCurrency(pendingTotal),
+      description: `${openInvoices.length} facturas sin saldar`,
+      icon: Clock3,
+    },
+    {
+      title: "Facturas vencidas",
+      value: String(overdueCount),
+      description: "Vencidas al día de hoy",
+      icon: AlertTriangle,
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
 
       {stats.map((stat) => {
         const Icon = stat.icon;
@@ -47,28 +96,31 @@ export default function SalesStats() {
               border
               border-stone-200
               rounded-2xl
-              p-5
+              p-4
+              sm:p-5
               shadow-sm
             "
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
 
-              <div>
-                <p className="text-sm text-stone-500">
+              <div className="min-w-0">
+
+                <p className="text-xs sm:text-sm text-stone-500 truncate">
                   {stat.title}
                 </p>
 
-                <p className="text-2xl font-bold text-stone-800 mt-2">
+                <p className="text-lg sm:text-2xl font-bold text-stone-800 mt-1.5 sm:mt-2 truncate">
                   {stat.value}
                 </p>
 
-                <p className="text-xs text-stone-400 mt-2">
+                <p className="text-[11px] sm:text-xs text-stone-400 mt-1.5 sm:mt-2">
                   {stat.description}
                 </p>
+
               </div>
 
-              <div className="w-11 h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-                <Icon size={21} />
+              <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center shrink-0">
+                <Icon size={18} />
               </div>
 
             </div>

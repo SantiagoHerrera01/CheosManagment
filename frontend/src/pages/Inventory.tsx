@@ -1,296 +1,65 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Search,
   Package,
   Plus,
-  Pencil,
   ArrowDownToLine,
   ArrowUpFromLine,
   AlertTriangle,
-  X,
+  Ban,
+  CheckCircle2,
+  Factory,
+  Layers,
+  RotateCcw,
+  ShoppingCart,
   Boxes,
   CircleDollarSign,
   SlidersHorizontal,
+  Loader2,
 } from "lucide-react";
 
+import { api, ApiError, qs } from "../lib/api";
+import { useAuth } from "../context/auth-context";
+import Modal from "../components/ui/Modal";
+import Select from "../components/ui/Select";
+import type {
+  InventoryMovement,
+  MovementReason,
+  Paginated,
+  Product,
+} from "../types/api";
+
 type InventoryItem = {
-  id: number;
+  key: string;
+  productId: string;
+  presentationId: string;
   product: string;
   process: string;
   presentation: string;
   type: "Molido" | "Grano";
-  cost: number;
-  wholesale: number;
-  retail: number | null;
+  cost?: number;
+  price: number;
   stock: number;
   minimumStock: number;
   active: boolean;
 };
 
-type MovementType = "entrada" | "salida" | "ajuste";
-
-type InventoryMovement = {
-  id: number;
-  product: string;
-  presentation: string;
-  type: MovementType;
-  quantity: number;
-  reason: string;
-  date: string;
+const REASON_LABELS: Record<MovementReason, string> = {
+  VENTA: "Venta",
+  OBSEQUIO: "Obsequio",
+  PRODUCCION: "Producción",
+  COMPRA: "Compra",
+  DEVOLUCION: "Devolución",
+  AJUSTE: "Ajuste",
+  MERMA: "Merma",
 };
 
-const initialInventory: InventoryItem[] = [
-  {
-    id: 1,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "125 g",
-    type: "Molido",
-    cost: 8036,
-    wholesale: 12900,
-    retail: 19900,
-    stock: 18,
-    minimumStock: 5,
-    active: true,
-  },
-  {
-    id: 2,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "125 g",
-    type: "Grano",
-    cost: 8036,
-    wholesale: 12900,
-    retail: 19900,
-    stock: 12,
-    minimumStock: 5,
-    active: true,
-  },
-  {
-    id: 3,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "250 g",
-    type: "Molido",
-    cost: 13552,
-    wholesale: 19900,
-    retail: 28000,
-    stock: 9,
-    minimumStock: 5,
-    active: true,
-  },
-  {
-    id: 4,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "250 g",
-    type: "Grano",
-    cost: 13552,
-    wholesale: 19900,
-    retail: 28000,
-    stock: 4,
-    minimumStock: 5,
-    active: true,
-  },
-  {
-    id: 5,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "500 g",
-    type: "Molido",
-    cost: 23995,
-    wholesale: 30000,
-    retail: 40000,
-    stock: 7,
-    minimumStock: 3,
-    active: true,
-  },
-  {
-    id: 6,
-    product: "CHEO'S Tradicional",
-    process: "Suave lavado",
-    presentation: "500 g",
-    type: "Grano",
-    cost: 23995,
-    wholesale: 30000,
-    retail: 40000,
-    stock: 3,
-    minimumStock: 3,
-    active: true,
-  },
-  {
-    id: 7,
-    product: "CHEO'S Café Institucional",
-    process: "Suave lavado",
-    presentation: "2.5 kg",
-    type: "Molido",
-    cost: 108250,
-    wholesale: 140000,
-    retail: null,
-    stock: 5,
-    minimumStock: 2,
-    active: true,
-  },
-  {
-    id: 8,
-    product: "CHEO'S Café Institucional",
-    process: "Suave lavado",
-    presentation: "2.5 kg",
-    type: "Grano",
-    cost: 108250,
-    wholesale: 140000,
-    retail: null,
-    stock: 2,
-    minimumStock: 2,
-    active: true,
-  },
-  {
-    id: 9,
-    product: "Chiroso Urrao",
-    process: "Exótico",
-    presentation: "125 g",
-    type: "Molido",
-    cost: 12250,
-    wholesale: 17900,
-    retail: 24000,
-    stock: 8,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 10,
-    product: "Chiroso Urrao",
-    process: "Exótico",
-    presentation: "250 g",
-    type: "Molido",
-    cost: 20750,
-    wholesale: 28900,
-    retail: 35000,
-    stock: 3,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 11,
-    product: "Chiroso Urrao",
-    process: "Exótico",
-    presentation: "250 g",
-    type: "Grano",
-    cost: 20750,
-    wholesale: 28900,
-    retail: 35000,
-    stock: 6,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 12,
-    product: "Papayo Honey",
-    process: "Honey",
-    presentation: "250 g",
-    type: "Molido",
-    cost: 18250,
-    wholesale: 27900,
-    retail: 35000,
-    stock: 2,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 13,
-    product: "Papayo Honey",
-    process: "Honey",
-    presentation: "250 g",
-    type: "Grano",
-    cost: 18250,
-    wholesale: 27900,
-    retail: 35000,
-    stock: 5,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 14,
-    product: "Bourbon Rosado Honey",
-    process: "Honey",
-    presentation: "250 g",
-    type: "Molido",
-    cost: 26450,
-    wholesale: 35900,
-    retail: 40000,
-    stock: 1,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 15,
-    product: "Bourbon Rosado Honey",
-    process: "Honey",
-    presentation: "250 g",
-    type: "Grano",
-    cost: 26450,
-    wholesale: 35900,
-    retail: 40000,
-    stock: 4,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 16,
-    product: "Natural Melaza de Caña",
-    process: "Natural",
-    presentation: "250 g",
-    type: "Molido",
-    cost: 26450,
-    wholesale: 35900,
-    retail: 40000,
-    stock: 6,
-    minimumStock: 4,
-    active: true,
-  },
-  {
-    id: 17,
-    product: "Natural Melaza de Caña",
-    process: "Natural",
-    presentation: "250 g",
-    type: "Grano",
-    cost: 26450,
-    wholesale: 35900,
-    retail: 40000,
-    stock: 3,
-    minimumStock: 4,
-    active: true,
-  },
-];
-
-const initialMovements: InventoryMovement[] = [
-  {
-    id: 1,
-    product: "CHEO'S Tradicional",
-    presentation: "125 g · Molido",
-    type: "entrada",
-    quantity: 20,
-    reason: "Compra de mercancía",
-    date: "Hoy, 08:30",
-  },
-  {
-    id: 2,
-    product: "Papayo Honey",
-    presentation: "250 g · Molido",
-    type: "salida",
-    quantity: 3,
-    reason: "Venta factura #000124",
-    date: "Hoy, 09:15",
-  },
-  {
-    id: 3,
-    product: "Bourbon Rosado Honey",
-    presentation: "250 g · Molido",
-    type: "ajuste",
-    quantity: -1,
-    reason: "Ajuste por conteo físico",
-    date: "Ayer, 16:40",
-  },
+/** Motivos que el backend acepta para una entrada manual de stock. */
+const ENTRY_REASONS: { value: MovementReason; label: string }[] = [
+  { value: "PRODUCCION", label: "Producción" },
+  { value: "COMPRA", label: "Compra" },
+  { value: "DEVOLUCION", label: "Devolución" },
+  { value: "AJUSTE", label: "Ajuste" },
 ];
 
 function formatCurrency(value: number) {
@@ -314,11 +83,31 @@ function getStockStatus(item: InventoryItem) {
 }
 
 export default function Inventory() {
+  const { hasRole } = useAuth();
+
   const [inventory, setInventory] =
-    useState<InventoryItem[]>(initialInventory);
+    useState<InventoryItem[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [loadError, setLoadError] =
+    useState<string | null>(null);
 
   const [movements, setMovements] =
-    useState<InventoryMovement[]>(initialMovements);
+    useState<InventoryMovement[]>([]);
+
+  const [movementsLoading, setMovementsLoading] =
+    useState(false);
+
+  const [movementsLoaded, setMovementsLoaded] =
+    useState(false);
+
+  const [movementsError, setMovementsError] =
+    useState<string | null>(null);
+
+  const [movementsForbidden, setMovementsForbidden] =
+    useState(false);
 
   const [search, setSearch] = useState("");
 
@@ -334,29 +123,141 @@ export default function Inventory() {
   const [isMovementModalOpen, setIsMovementModalOpen] =
     useState(false);
 
-  const [movementType, setMovementType] =
-    useState<MovementType>("entrada");
-
-  const [selectedProduct, setSelectedProduct] =
-    useState<InventoryItem | null>(null);
+  const [selectedKey, setSelectedKey] =
+    useState("");
 
   const [quantity, setQuantity] = useState("");
 
-  const [reason, setReason] = useState("");
+  const [reason, setReason] =
+    useState<MovementReason>("PRODUCCION");
 
-  const [isEditModalOpen, setIsEditModalOpen] =
-    useState(false);
+  const [notes, setNotes] = useState("");
 
-  const [editingItem, setEditingItem] =
-    useState<InventoryItem | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const [editStock, setEditStock] = useState("");
-
-  const [editMinimumStock, setEditMinimumStock] =
-    useState("");
+  const [saveError, setSaveError] =
+    useState<string | null>(null);
 
   const [showMovements, setShowMovements] =
     useState(false);
+
+  /** Trae los productos activos y aplana producto × presentación (sin estado). */
+  const fetchInventory = useCallback(async () => {
+    const all: Product[] = [];
+    // El backend limita a 100 por página: recorremos todas las páginas.
+    for (let page = 1; ; page += 1) {
+      const result = await api.get<Paginated<Product>>(
+        `/products${qs({
+          active: "true",
+          page,
+          limit: 100,
+        })}`
+      );
+      all.push(...result.data);
+      if (all.length >= result.meta.total || result.data.length === 0) break;
+    }
+
+    const items: InventoryItem[] = [];
+
+    for (const product of all) {
+      if (!product.isActive) {
+        continue;
+      }
+
+      for (const presentation of product.presentations) {
+        if (!presentation.isActive) {
+          continue;
+        }
+
+        items.push({
+          key: presentation.id,
+          productId: product.id,
+          presentationId: presentation.id,
+          product: product.name,
+          process:
+            [product.variety, product.process]
+              .filter(Boolean)
+              .join(" · ") || "—",
+          presentation: presentation.label,
+          type:
+            presentation.grind === "MOLIDO"
+              ? "Molido"
+              : "Grano",
+          cost: presentation.cost,
+          price: presentation.price,
+          stock: presentation.stock,
+          minimumStock: presentation.minimumStock,
+          active: presentation.isActive,
+        });
+      }
+    }
+
+    return items;
+  }, []);
+
+  const loadInventory = useCallback(() => {
+    return fetchInventory()
+      .then((items) => {
+        setInventory(items);
+      })
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar el inventario."
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [fetchInventory]);
+
+  /** Historial de movimientos (roles ADMIN, BODEGA y CONTADOR). */
+  const loadMovements = useCallback(async () => {
+    try {
+      const all: InventoryMovement[] = [];
+      for (let page = 1; ; page += 1) {
+        const result = await api.get<Paginated<InventoryMovement>>(
+          `/inventory/movements${qs({
+            page,
+            limit: 100,
+          })}`
+        );
+        all.push(...result.data);
+        if (all.length >= result.meta.total || result.data.length === 0) break;
+      }
+      setMovements(all);
+      setMovementsLoaded(true);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        // Rol sin permiso (p. ej. VENDEDOR): no es un error técnico.
+        setMovementsForbidden(true);
+        setMovementsLoaded(true);
+      } else {
+        setMovementsError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar los movimientos."
+        );
+      }
+    } finally {
+      setMovementsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadInventory();
+  }, [loadInventory]);
+
+  /** Carga perezosa: los movimientos se piden solo al primer expandir. */
+  const toggleMovements = () => {
+    const next = !showMovements;
+    setShowMovements(next);
+
+    if (next && !movementsLoaded && !movementsLoading) {
+      void loadMovements();
+    }
+  };
 
   const processes = [
     "Todos",
@@ -378,6 +279,9 @@ export default function Inventory() {
       if (
         normalizedSearch &&
         !item.product.toLowerCase().includes(normalizedSearch) &&
+        !item.process
+          .toLowerCase()
+          .includes(normalizedSearch) &&
         !item.presentation
           .toLowerCase()
           .includes(normalizedSearch) &&
@@ -423,11 +327,14 @@ export default function Inventory() {
     .filter((item) => item.active)
     .reduce((total, item) => total + item.stock, 0);
 
+  // `cost` solo lo envían los roles ADMIN y CONTADOR.
+  const costsAvailable = hasRole("CONTADOR");
+
   const totalInventoryValue = inventory
     .filter((item) => item.active)
     .reduce(
       (total, item) =>
-        total + item.stock * item.cost,
+        total + item.stock * (item.cost ?? 0),
       0
     );
 
@@ -444,141 +351,71 @@ export default function Inventory() {
       item.stock === 0
   );
 
-  const openMovementModal = (
-    type: MovementType,
-    item?: InventoryItem
-  ) => {
-    setMovementType(type);
-    setSelectedProduct(item ?? null);
+  const selectedItem =
+    inventory.find(
+      (item) => item.presentationId === selectedKey
+    ) ?? null;
+
+  const openMovementModal = (item?: InventoryItem) => {
+    setSelectedKey(item?.presentationId ?? "");
     setQuantity("");
-    setReason("");
+    setReason("PRODUCCION");
+    setNotes("");
+    setSaveError(null);
     setIsMovementModalOpen(true);
   };
 
   const closeMovementModal = () => {
     setIsMovementModalOpen(false);
-    setSelectedProduct(null);
+    setSelectedKey("");
     setQuantity("");
-    setReason("");
+    setReason("PRODUCCION");
+    setNotes("");
+    setSaveError(null);
   };
 
-  const handleMovement = () => {
-    if (!selectedProduct) {
+  const handleMovement = async () => {
+    if (!selectedItem) {
       return;
     }
 
     const numericQuantity = Number(quantity);
 
-    if (
-      !Number.isFinite(numericQuantity) ||
-      numericQuantity <= 0
-    ) {
+    if (!Number.isInteger(numericQuantity) || numericQuantity <= 0) {
+      setSaveError("La cantidad debe ser un número entero mayor que cero.");
       return;
     }
 
-    let difference = numericQuantity;
+    setSaving(true);
+    setSaveError(null);
 
-    if (movementType === "salida") {
-      difference = -numericQuantity;
+    try {
+      await api.post(
+        `/products/${selectedItem.productId}/presentations/${selectedItem.presentationId}/stock`,
+        {
+          quantity: numericQuantity,
+          reason,
+          notes: notes.trim() || null,
+        }
+      );
+
+      closeMovementModal();
+      await loadInventory();
+
+      // Si el panel ya estaba cargado se refresca;
+      // si no, se carga en el próximo expandir.
+      if (movementsLoaded) {
+        await loadMovements();
+      }
+    } catch (error) {
+      setSaveError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible registrar la entrada."
+      );
+    } finally {
+      setSaving(false);
     }
-
-    if (movementType === "ajuste") {
-      difference =
-        numericQuantity - selectedProduct.stock;
-    }
-
-    const newStock =
-      selectedProduct.stock + difference;
-
-    if (newStock < 0) {
-      return;
-    }
-
-    setInventory((previous) =>
-      previous.map((item) =>
-        item.id === selectedProduct.id
-          ? {
-              ...item,
-              stock: newStock,
-            }
-          : item
-      )
-    );
-
-    const movement: InventoryMovement = {
-      id: Date.now(),
-      product: selectedProduct.product,
-      presentation: `${selectedProduct.presentation} · ${selectedProduct.type}`,
-      type: movementType,
-      quantity:
-        movementType === "ajuste"
-          ? difference
-          : numericQuantity,
-      reason:
-        reason.trim() ||
-        (movementType === "entrada"
-          ? "Entrada de mercancía"
-          : movementType === "salida"
-          ? "Salida de mercancía"
-          : "Ajuste manual"),
-      date: "Ahora",
-    };
-
-    setMovements((previous) => [
-      movement,
-      ...previous,
-    ]);
-
-    closeMovementModal();
-  };
-
-  const openEditModal = (item: InventoryItem) => {
-    setEditingItem(item);
-    setEditStock(String(item.stock));
-    setEditMinimumStock(
-      String(item.minimumStock)
-    );
-    setIsEditModalOpen(true);
-  };
-
-  const closeEditModal = () => {
-    setEditingItem(null);
-    setEditStock("");
-    setEditMinimumStock("");
-    setIsEditModalOpen(false);
-  };
-
-  const saveInventorySettings = () => {
-    if (!editingItem) {
-      return;
-    }
-
-    const newStock = Number(editStock);
-    const newMinimumStock =
-      Number(editMinimumStock);
-
-    if (
-      !Number.isFinite(newStock) ||
-      newStock < 0 ||
-      !Number.isFinite(newMinimumStock) ||
-      newMinimumStock < 0
-    ) {
-      return;
-    }
-
-    setInventory((previous) =>
-      previous.map((item) =>
-        item.id === editingItem.id
-          ? {
-              ...item,
-              stock: newStock,
-              minimumStock: newMinimumStock,
-            }
-          : item
-      )
-    );
-
-    closeEditModal();
   };
 
   return (
@@ -601,9 +438,8 @@ export default function Inventory() {
 
           <button
             type="button"
-            onClick={() =>
-              openMovementModal("salida")
-            }
+            disabled
+            title="Las salidas se registran automáticamente al facturar"
             className="
               inline-flex
               items-center
@@ -618,6 +454,8 @@ export default function Inventory() {
               font-semibold
               hover:bg-stone-50
               transition
+              opacity-40
+              cursor-not-allowed
             "
           >
             <ArrowUpFromLine size={18} />
@@ -627,7 +465,7 @@ export default function Inventory() {
           <button
             type="button"
             onClick={() =>
-              openMovementModal("entrada")
+              openMovementModal()
             }
             className="
               inline-flex
@@ -652,26 +490,24 @@ export default function Inventory() {
       </div>
 
       {/* TARJETAS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
 
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-5 shadow-sm">
 
           <div className="flex justify-between items-start">
 
             <div>
-              <p className="text-sm text-stone-500">
+              <p className="text-xs sm:text-sm text-stone-500 truncate">
                 Referencias
               </p>
 
-              <p className="text-2xl font-bold text-stone-800 mt-2">
-                {inventory.filter(
-                  (item) => item.active
-                ).length}
+              <p className="text-lg sm:text-2xl font-bold text-stone-800 mt-1.5 sm:mt-2 truncate">
+                {inventory.length}
               </p>
             </div>
 
-            <div className="w-11 h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-              <Package size={21} />
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center shrink-0">
+              <Package size={18} />
             </div>
 
           </div>
@@ -682,22 +518,22 @@ export default function Inventory() {
 
         </div>
 
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-5 shadow-sm">
 
           <div className="flex justify-between items-start">
 
             <div>
-              <p className="text-sm text-stone-500">
+              <p className="text-xs sm:text-sm text-stone-500 truncate">
                 Unidades disponibles
               </p>
 
-              <p className="text-2xl font-bold text-stone-800 mt-2">
+              <p className="text-lg sm:text-2xl font-bold text-stone-800 mt-1.5 sm:mt-2 truncate">
                 {totalUnits}
               </p>
             </div>
 
-            <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Boxes size={21} />
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+              <Boxes size={18} />
             </div>
 
           </div>
@@ -708,35 +544,39 @@ export default function Inventory() {
 
         </div>
 
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-5 shadow-sm">
 
           <div className="flex justify-between items-start">
 
             <div>
-              <p className="text-sm text-stone-500">
+              <p className="text-xs sm:text-sm text-stone-500 truncate">
                 Valor del inventario
               </p>
 
-              <p className="text-2xl font-bold text-stone-800 mt-2">
+              <p className="text-lg sm:text-2xl font-bold text-stone-800 mt-1.5 sm:mt-2 truncate">
                 {formatCurrency(
-                  totalInventoryValue
+                  costsAvailable
+                    ? totalInventoryValue
+                    : 0
                 )}
               </p>
             </div>
 
-            <div className="w-11 h-11 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
-              <CircleDollarSign size={21} />
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-green-50 text-green-600 flex items-center justify-center shrink-0">
+              <CircleDollarSign size={18} />
             </div>
 
           </div>
 
           <p className="text-xs text-stone-400 mt-3">
-            Calculado al costo de producción
+            {costsAvailable
+              ? "Calculado al costo de producción"
+              : "Costo no disponible para tu rol"}
           </p>
 
         </div>
 
-        <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-stone-200 rounded-2xl p-4 sm:p-5 shadow-sm">
 
           <div className="flex justify-between items-start">
 
@@ -745,14 +585,14 @@ export default function Inventory() {
                 Requieren atención
               </p>
 
-              <p className="text-2xl font-bold text-red-600 mt-2">
+              <p className="text-lg sm:text-2xl font-bold text-red-600 mt-1.5 sm:mt-2 truncate">
                 {lowStockItems.length +
                   outOfStockItems.length}
               </p>
             </div>
 
-            <div className="w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
-              <AlertTriangle size={21} />
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+              <AlertTriangle size={18} />
             </div>
 
           </div>
@@ -813,10 +653,10 @@ export default function Inventory() {
 
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
 
             {/* BUSCAR */}
-            <div className="relative xl:col-span-2">
+            <div className="relative col-span-2 lg:col-span-2">
 
               <Search
                 size={18}
@@ -847,113 +687,76 @@ export default function Inventory() {
             </div>
 
             {/* PROCESO */}
-            <select
+            <Select
               value={processFilter}
-              onChange={(event) =>
+              onChange={(value) =>
                 setProcessFilter(
-                  event.target.value
+                  value
                 )
               }
-              className="
-                border
-                border-stone-300
-                rounded-xl
-                px-4
-                py-3
-                bg-white
-                outline-none
-                focus:ring-2
-                focus:ring-[#6F4E37]/20
-                focus:border-[#6F4E37]
-              "
-            >
-              {processes.map((process) => (
-                <option
-                  key={process}
-                  value={process}
-                >
-                  {process === "Todos"
-                    ? "Todos los procesos"
-                    : process}
-                </option>
-              ))}
-            </select>
+              aria-label="Filtrar por proceso"
+              options={processes.map((process) => ({
+                value: process,
+                label: process === "Todos" ? "Todos los procesos" : process,
+                icon: Factory,
+              }))}
+            />
 
             {/* TIPO */}
-            <select
+            <Select
               value={typeFilter}
-              onChange={(event) =>
+              onChange={(value) =>
                 setTypeFilter(
-                  event.target.value
+                  value
                 )
               }
-              className="
-                border
-                border-stone-300
-                rounded-xl
-                px-4
-                py-3
-                bg-white
-                outline-none
-                focus:ring-2
-                focus:ring-[#6F4E37]/20
-                focus:border-[#6F4E37]
-              "
-            >
-              <option value="Todos">
-                Todos los tipos
-              </option>
-
-              <option value="Molido">
-                Molido
-              </option>
-
-              <option value="Grano">
-                Grano
-              </option>
-            </select>
+              aria-label="Filtrar por tipo"
+              options={[
+                { value: "Todos", label: "Todos los tipos", icon: Layers },
+                { value: "Molido", label: "Molido", icon: Package },
+                { value: "Grano", label: "Grano", icon: Boxes },
+              ]}
+            />
 
             {/* STOCK */}
-            <select
+            <Select
               value={stockFilter}
-              onChange={(event) =>
+              onChange={(value) =>
                 setStockFilter(
-                  event.target.value
+                  value
                 )
               }
-              className="
-                border
-                border-stone-300
-                rounded-xl
-                px-4
-                py-3
-                bg-white
-                outline-none
-                focus:ring-2
-                focus:ring-[#6F4E37]/20
-                focus:border-[#6F4E37]
-              "
-            >
-              <option value="Todos">
-                Todo el stock
-              </option>
-
-              <option value="normal">
-                Stock normal
-              </option>
-
-              <option value="bajo">
-                Stock bajo
-              </option>
-
-              <option value="agotado">
-                Agotados
-              </option>
-            </select>
+              aria-label="Filtrar por stock"
+              options={[
+                { value: "Todos", label: "Todo el stock", icon: Layers },
+                { value: "normal", label: "Stock normal", icon: CheckCircle2 },
+                { value: "bajo", label: "Stock bajo", icon: AlertTriangle },
+                { value: "agotado", label: "Agotados", icon: Ban },
+              ]}
+            />
 
           </div>
 
         </div>
+
+        {/* ERROR DE CARGA */}
+        {loadError && (
+          <div className="px-6 py-4 bg-red-50 border-b border-stone-200 text-sm text-red-600 flex items-center justify-between gap-3">
+            <span>{loadError}</span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setLoadError(null);
+                void loadInventory();
+              }}
+              className="font-semibold underline shrink-0"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         {/* TABLA */}
         <div className="overflow-x-auto">
@@ -980,11 +783,7 @@ export default function Inventory() {
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  Mayorista
-                </th>
-
-                <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  Detal
+                  Precio
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
@@ -1004,11 +803,29 @@ export default function Inventory() {
 
             <tbody>
 
-              {filteredInventory.length === 0 ? (
+              {loading ? (
                 <tr>
 
                   <td
-                    colSpan={9}
+                    colSpan={8}
+                    className="px-6 py-16 text-center"
+                  >
+                    <Loader2
+                      size={30}
+                      className="mx-auto text-[#6F4E37] animate-spin"
+                    />
+
+                    <p className="mt-3 text-sm text-stone-500">
+                      Cargando inventario…
+                    </p>
+                  </td>
+
+                </tr>
+              ) : filteredInventory.length === 0 ? (
+                <tr>
+
+                  <td
+                    colSpan={8}
                     className="px-6 py-16 text-center"
                   >
 
@@ -1036,7 +853,7 @@ export default function Inventory() {
 
                   return (
                     <tr
-                      key={item.id}
+                      key={item.key}
                       className="
                         border-b
                         border-stone-100
@@ -1108,32 +925,10 @@ export default function Inventory() {
                       {/* COSTO */}
                       <td className="px-6 py-5 text-right">
 
-                        <span className="text-sm text-stone-700">
-                          {formatCurrency(
-                            item.cost
-                          )}
-                        </span>
-
-                      </td>
-
-                      {/* MAYORISTA */}
-                      <td className="px-6 py-5 text-right">
-
-                        <span className="text-sm text-stone-700">
-                          {formatCurrency(
-                            item.wholesale
-                          )}
-                        </span>
-
-                      </td>
-
-                      {/* DETAL */}
-                      <td className="px-6 py-5 text-right">
-
-                        {item.retail ? (
+                        {item.cost !== undefined ? (
                           <span className="text-sm text-stone-700">
                             {formatCurrency(
-                              item.retail
+                              item.cost
                             )}
                           </span>
                         ) : (
@@ -1144,13 +939,24 @@ export default function Inventory() {
 
                       </td>
 
+                      {/* PRECIO */}
+                      <td className="px-6 py-5 text-right">
+
+                        <span className="text-sm text-stone-700">
+                          {formatCurrency(
+                            item.price
+                          )}
+                        </span>
+
+                      </td>
+
                       {/* VALOR INVENTARIO */}
                       <td className="px-6 py-5 text-right">
 
                         <span className="text-sm font-semibold text-stone-800">
                           {formatCurrency(
                             item.stock *
-                              item.cost
+                              (item.cost ?? 0)
                           )}
                         </span>
 
@@ -1188,7 +994,6 @@ export default function Inventory() {
                             type="button"
                             onClick={() =>
                               openMovementModal(
-                                "entrada",
                                 item
                               )
                             }
@@ -1212,13 +1017,8 @@ export default function Inventory() {
 
                           <button
                             type="button"
-                            onClick={() =>
-                              openMovementModal(
-                                "salida",
-                                item
-                              )
-                            }
-                            title="Registrar salida"
+                            disabled
+                            title="Las salidas se registran automáticamente al facturar"
                             className="
                               w-9
                               h-9
@@ -1229,33 +1029,13 @@ export default function Inventory() {
                               text-orange-600
                               hover:bg-orange-50
                               transition
+                              opacity-40
+                              cursor-not-allowed
                             "
                           >
                             <ArrowUpFromLine
                               size={17}
                             />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openEditModal(item)
-                            }
-                            title="Editar inventario"
-                            className="
-                              w-9
-                              h-9
-                              rounded-lg
-                              flex
-                              items-center
-                              justify-center
-                              text-stone-500
-                              hover:bg-stone-100
-                              hover:text-[#6F4E37]
-                              transition
-                            "
-                          >
-                            <Pencil size={17} />
                           </button>
 
                         </div>
@@ -1280,11 +1060,7 @@ export default function Inventory() {
 
         <button
           type="button"
-          onClick={() =>
-            setShowMovements(
-              (previous) => !previous
-            )
-          }
+          onClick={toggleMovements}
           className="
             w-full
             px-6
@@ -1320,80 +1096,140 @@ export default function Inventory() {
         {showMovements && (
           <div className="border-t border-stone-200">
 
-            {movements.map((movement) => (
+            {movementsLoading ? (
 
-              <div
-                key={movement.id}
-                className="px-6 py-4 border-b border-stone-100 last:border-0 flex items-center justify-between gap-4"
-              >
+              <div className="px-6 py-10 text-center">
+                <Loader2
+                  size={26}
+                  className="mx-auto text-[#6F4E37] animate-spin"
+                />
 
-                <div className="flex items-center gap-3">
+                <p className="mt-3 text-sm text-stone-500">
+                  Cargando movimientos…
+                </p>
+              </div>
+
+            ) : movementsForbidden ? (
+
+              <div className="px-6 py-8 text-center">
+                <p className="text-sm text-stone-500">
+                  Tu rol no tiene acceso al historial de movimientos.
+                </p>
+              </div>
+
+            ) : movementsError ? (
+
+              <div className="px-6 py-4 bg-red-50 text-sm text-red-600 flex items-center justify-between gap-3">
+                <span>{movementsError}</span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMovementsLoading(true);
+                    setMovementsError(null);
+                    setMovementsForbidden(false);
+                    void loadMovements();
+                  }}
+                  className="font-semibold underline shrink-0"
+                >
+                  Reintentar
+                </button>
+              </div>
+
+            ) : movements.length === 0 ? (
+
+              <div className="px-6 py-8 text-center">
+                <p className="text-sm text-stone-500">
+                  Aún no hay movimientos registrados.
+                </p>
+              </div>
+
+            ) : (
+
+              movements.map((movement) => (
+
+                <div
+                  key={movement.id}
+                  className="px-6 py-4 border-b border-stone-100 last:border-0 flex items-center justify-between gap-4"
+                >
+
+                  <div className="flex items-center gap-3">
+
+                    <div
+                      className={
+                        movement.type === "ENTRADA"
+                          ? "w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center"
+                          : movement.type === "SALIDA"
+                          ? "w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center"
+                          : "w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"
+                      }
+                    >
+                      {movement.type ===
+                        "ENTRADA" && (
+                        <ArrowDownToLine size={18} />
+                      )}
+
+                      {movement.type ===
+                        "SALIDA" && (
+                        <ArrowUpFromLine size={18} />
+                      )}
+
+                      {movement.type ===
+                        "AJUSTE" && (
+                        <SlidersHorizontal size={18} />
+                      )}
+                    </div>
+
+                    <div>
+
+                      <p className="font-medium text-stone-800">
+                        {movement.product}
+                      </p>
+
+                      <p className="text-xs text-stone-500 mt-1">
+                        {movement.presentation}
+                      </p>
+
+                      <p className="text-xs text-stone-400 mt-1">
+                        {REASON_LABELS[movement.reason] ??
+                          movement.reason} ·{" "}
+                        {movement.createdBy} ·{" "}
+                        {new Date(
+                          movement.createdAt
+                        ).toLocaleString("es-CO")}
+                      </p>
+
+                    </div>
+
+                  </div>
 
                   <div
                     className={
-                      movement.type === "entrada"
-                        ? "w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center"
-                        : movement.type === "salida"
-                        ? "w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center"
-                        : "w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"
+                      movement.type === "ENTRADA"
+                        ? "font-bold text-green-600"
+                        : movement.type === "SALIDA"
+                        ? "font-bold text-orange-600"
+                        : "font-bold text-blue-600"
                     }
                   >
                     {movement.type ===
-                      "entrada" && (
-                      <ArrowDownToLine size={18} />
-                    )}
+                      "ENTRADA" &&
+                      `+${movement.quantity}`}
 
                     {movement.type ===
-                      "salida" && (
-                      <ArrowUpFromLine size={18} />
-                    )}
+                      "SALIDA" &&
+                      `−${Math.abs(movement.quantity)}`}
 
                     {movement.type ===
-                      "ajuste" && (
-                      <SlidersHorizontal size={18} />
-                    )}
-                  </div>
-
-                  <div>
-
-                    <p className="font-medium text-stone-800">
-                      {movement.product}
-                    </p>
-
-                    <p className="text-xs text-stone-500 mt-1">
-                      {movement.presentation}
-                    </p>
-
-                    <p className="text-xs text-stone-400 mt-1">
-                      {movement.reason} ·{" "}
-                      {movement.date}
-                    </p>
-
+                      "AJUSTE" &&
+                      movement.quantity}
                   </div>
 
                 </div>
 
-                <div
-                  className={
-                    movement.type === "entrada"
-                      ? "font-bold text-green-600"
-                      : movement.type === "salida"
-                      ? "font-bold text-orange-600"
-                      : "font-bold text-blue-600"
-                  }
-                >
-                  {movement.type ===
-                    "entrada" && "+"}
+              ))
 
-                  {movement.type ===
-                    "salida" && "-"}
-
-                  {movement.quantity}
-                </div>
-
-              </div>
-
-            ))}
+            )}
 
           </div>
         )}
@@ -1402,217 +1238,19 @@ export default function Inventory() {
 
       {/* MODAL MOVIMIENTO */}
       {isMovementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-
-          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
-
-            <div className="px-6 py-5 border-b border-stone-200 flex items-center justify-between">
-
-              <div>
-
-                <h2 className="text-xl font-bold text-stone-800">
-                  {movementType ===
-                    "entrada" &&
-                    "Registrar entrada"}
-
-                  {movementType ===
-                    "salida" &&
-                    "Registrar salida"}
-
-                  {movementType ===
-                    "ajuste" &&
-                    "Ajustar inventario"}
-                </h2>
-
-                <p className="text-sm text-stone-500 mt-1">
-                  Actualiza las existencias del producto.
-                </p>
-
-              </div>
+        <Modal
+          icon={ArrowDownToLine}
+          title="Registrar entrada"
+          subtitle="Actualiza las existencias del producto."
+          onClose={closeMovementModal}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
 
               <button
                 type="button"
                 onClick={closeMovementModal}
-                className="w-9 h-9 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"
-              >
-                <X size={20} />
-              </button>
-
-            </div>
-
-            <div className="p-6 space-y-5">
-
-              {/* PRODUCTO */}
-              <div>
-
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Producto
-                </label>
-
-                <select
-                  value={
-                    selectedProduct?.id ?? ""
-                  }
-                  onChange={(event) => {
-                    const item =
-                      inventory.find(
-                        (product) =>
-                          product.id ===
-                          Number(
-                            event.target.value
-                          )
-                      );
-
-                    setSelectedProduct(
-                      item ?? null
-                    );
-                  }}
-                  className="
-                    w-full
-                    border
-                    border-stone-300
-                    rounded-xl
-                    px-4
-                    py-3
-                    bg-white
-                    outline-none
-                    focus:border-[#6F4E37]
-                    focus:ring-2
-                    focus:ring-[#6F4E37]/20
-                  "
-                >
-                  <option value="">
-                    Selecciona un producto
-                  </option>
-
-                  {inventory
-                    .filter(
-                      (item) => item.active
-                    )
-                    .map((item) => (
-                      <option
-                        key={item.id}
-                        value={item.id}
-                      >
-                        {item.product} ·{" "}
-                        {item.presentation} ·{" "}
-                        {item.type}
-                      </option>
-                    ))}
-                </select>
-
-              </div>
-
-              {/* STOCK ACTUAL */}
-              {selectedProduct && (
-                <div className="rounded-xl bg-stone-50 border border-stone-200 p-4">
-
-                  <div className="flex justify-between">
-
-                    <span className="text-sm text-stone-500">
-                      Stock actual
-                    </span>
-
-                    <strong className="text-stone-800">
-                      {selectedProduct.stock} unidades
-                    </strong>
-
-                  </div>
-
-                </div>
-              )}
-
-              {/* CANTIDAD */}
-              <div>
-
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  {movementType === "ajuste"
-                    ? "Nuevo stock"
-                    : "Cantidad"}
-                </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  value={quantity}
-                  onChange={(event) =>
-                    setQuantity(
-                      event.target.value
-                    )
-                  }
-                  placeholder="0"
-                  className="
-                    w-full
-                    border
-                    border-stone-300
-                    rounded-xl
-                    px-4
-                    py-3
-                    outline-none
-                    focus:border-[#6F4E37]
-                    focus:ring-2
-                    focus:ring-[#6F4E37]/20
-                  "
-                />
-
-                {movementType ===
-                  "ajuste" && (
-                  <p className="text-xs text-stone-400 mt-2">
-                    Indica directamente cuántas unidades
-                    deben quedar.
-                  </p>
-                )}
-
-              </div>
-
-              {/* MOTIVO */}
-              <div>
-
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Motivo
-                </label>
-
-                <textarea
-                  value={reason}
-                  onChange={(event) =>
-                    setReason(
-                      event.target.value
-                    )
-                  }
-                  rows={3}
-                  placeholder={
-                    movementType ===
-                    "entrada"
-                      ? "Ej. Compra de mercancía..."
-                      : movementType ===
-                        "salida"
-                      ? "Ej. Producto usado, venta manual..."
-                      : "Ej. Conteo físico..."
-                  }
-                  className="
-                    w-full
-                    border
-                    border-stone-300
-                    rounded-xl
-                    px-4
-                    py-3
-                    outline-none
-                    resize-none
-                    focus:border-[#6F4E37]
-                    focus:ring-2
-                    focus:ring-[#6F4E37]/20
-                  "
-                />
-
-              </div>
-
-            </div>
-
-            <div className="px-6 py-5 border-t border-stone-200 flex justify-end gap-3">
-
-              <button
-                type="button"
-                onClick={closeMovementModal}
+                disabled={saving}
                 className="
                   px-5
                   py-3
@@ -1622,6 +1260,8 @@ export default function Inventory() {
                   text-stone-700
                   font-medium
                   hover:bg-stone-50
+                  disabled:opacity-40
+                  disabled:cursor-not-allowed
                 "
               >
                 Cancelar
@@ -1629,12 +1269,17 @@ export default function Inventory() {
 
               <button
                 type="button"
-                onClick={handleMovement}
+                onClick={() => void handleMovement()}
                 disabled={
-                  !selectedProduct ||
-                  !quantity
+                  !selectedItem ||
+                  !Number.isInteger(Number(quantity)) ||
+                  Number(quantity) <= 0 ||
+                  saving
                 }
                 className="
+                  inline-flex
+                  items-center
+                  gap-2
                   px-5
                   py-3
                   rounded-xl
@@ -1646,153 +1291,181 @@ export default function Inventory() {
                   font-semibold
                 "
               >
-                Confirmar movimiento
+                {saving && (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                )}
+
+                {saving
+                  ? "Registrando…"
+                  : "Registrar entrada"}
               </button>
 
             </div>
+          }
+        >
 
-          </div>
+          <div className="space-y-5">
 
-        </div>
-      )}
-
-      {/* MODAL EDITAR */}
-      {isEditModalOpen &&
-        editingItem && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-
-            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
-
-              <div className="px-6 py-5 border-b border-stone-200 flex justify-between items-center">
-
-                <div>
-                  <h2 className="text-xl font-bold text-stone-800">
-                    Editar inventario
-                  </h2>
-
-                  <p className="text-sm text-stone-500 mt-1">
-                    {editingItem.product} ·{" "}
-                    {editingItem.presentation}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeEditModal}
-                  className="w-9 h-9 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"
-                >
-                  <X size={20} />
-                </button>
-
+            {/* ERROR */}
+            {saveError && (
+              <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+                {saveError}
               </div>
+            )}
 
-              <div className="p-6 space-y-5">
+            {/* PRODUCTO */}
+            <div>
 
-                <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Producto
+              </label>
 
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
+              <Select
+                value={selectedKey}
+                onChange={(value) =>
+                  setSelectedKey(
+                    value
+                  )
+                }
+                placeholder="Selecciona un producto"
+                aria-label="Producto"
+                options={inventory.map((item) => ({
+                  value: item.presentationId,
+                  label: `${item.product} · ${item.presentation} · ${item.type} (${item.stock} und)`,
+                  icon: Package,
+                }))}
+              />
+
+            </div>
+
+            {/* STOCK ACTUAL */}
+            {selectedItem && (
+              <div className="rounded-xl bg-stone-50 border border-stone-200 p-4">
+
+                <div className="flex justify-between">
+
+                  <span className="text-sm text-stone-500">
                     Stock actual
-                  </label>
+                  </span>
 
-                  <input
-                    type="number"
-                    min="0"
-                    value={editStock}
-                    onChange={(event) =>
-                      setEditStock(
-                        event.target.value
-                      )
-                    }
-                    className="
-                      w-full
-                      border
-                      border-stone-300
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:border-[#6F4E37]
-                    "
-                  />
-
-                </div>
-
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Stock mínimo
-                  </label>
-
-                  <input
-                    type="number"
-                    min="0"
-                    value={editMinimumStock}
-                    onChange={(event) =>
-                      setEditMinimumStock(
-                        event.target.value
-                      )
-                    }
-                    className="
-                      w-full
-                      border
-                      border-stone-300
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:border-[#6F4E37]
-                    "
-                  />
-
-                  <p className="text-xs text-stone-400 mt-2">
-                    Cuando el inventario llegue a este número,
-                    aparecerá como stock bajo.
-                  </p>
+                  <strong className="text-stone-800">
+                    {selectedItem.stock} unidades
+                  </strong>
 
                 </div>
 
               </div>
+            )}
 
-              <div className="px-6 py-5 border-t border-stone-200 flex justify-end gap-3">
+            {/* CANTIDAD */}
+            <div>
 
-                <button
-                  type="button"
-                  onClick={closeEditModal}
-                  className="
-                    px-5
-                    py-3
-                    rounded-xl
-                    border
-                    border-stone-300
-                    text-stone-700
-                    font-medium
-                  "
-                >
-                  Cancelar
-                </button>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Cantidad
+              </label>
 
-                <button
-                  type="button"
-                  onClick={saveInventorySettings}
-                  className="
-                    px-5
-                    py-3
-                    rounded-xl
-                    bg-[#6F4E37]
-                    hover:bg-[#5B3F2D]
-                    text-white
-                    font-semibold
-                  "
-                >
-                  Guardar cambios
-                </button>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={quantity}
+                onChange={(event) =>
+                  setQuantity(
+                    event.target.value
+                  )
+                }
+                placeholder="0"
+                className="
+                  w-full
+                  border
+                  border-stone-300
+                  rounded-xl
+                  px-4
+                  py-3
+                  outline-none
+                  focus:border-[#6F4E37]
+                  focus:ring-2
+                  focus:ring-[#6F4E37]/20
+                "
+              />
 
-              </div>
+              <p className="text-xs text-stone-400 mt-2">
+                Indica cuántas unidades entran al inventario.
+              </p>
+
+            </div>
+
+            {/* MOTIVO */}
+            <div>
+
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Motivo
+              </label>
+
+              <Select
+                value={reason}
+                onChange={(value) =>
+                  setReason(
+                    value as MovementReason
+                  )
+                }
+                aria-label="Motivo"
+                options={ENTRY_REASONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                  icon:
+                    option.value === "PRODUCCION"
+                      ? Factory
+                      : option.value === "COMPRA"
+                        ? ShoppingCart
+                        : option.value === "DEVOLUCION"
+                          ? RotateCcw
+                          : SlidersHorizontal,
+                }))}
+              />
+
+            </div>
+
+            {/* NOTAS */}
+            <div>
+
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Notas (opcional)
+              </label>
+
+              <textarea
+                value={notes}
+                onChange={(event) =>
+                  setNotes(
+                    event.target.value
+                  )
+                }
+                rows={3}
+                placeholder="Ej. Compra de mercancía, lote 001..."
+                className="
+                  w-full
+                  border
+                  border-stone-300
+                  rounded-xl
+                  px-4
+                  py-3
+                  outline-none
+                  resize-none
+                  focus:border-[#6F4E37]
+                  focus:ring-2
+                  focus:ring-[#6F4E37]/20
+                "
+              />
 
             </div>
 
           </div>
-        )}
+
+        </Modal>
+      )}
 
     </div>
   );

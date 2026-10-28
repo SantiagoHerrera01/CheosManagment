@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Search,
   Plus,
@@ -8,25 +8,21 @@ import {
   Phone,
   MapPin,
   CreditCard,
-  X,
+  FileText,
+  Globe,
+  Landmark,
   UserRound,
+  Loader2,
 } from "lucide-react";
 
-type Customer = {
-  id: number;
-  name: string;
-  document: string;
-  phone: string;
-  city: string;
-  address: string;
-  email: string;
-  creditLimit: number;
-  balance: number;
-  active: boolean;
-};
+import { api, ApiError, qs } from "../lib/api";
+import Select from "../components/ui/Select";
+import Modal from "../components/ui/Modal";
+import type { Client, DocumentType, Paginated } from "../types/api";
 
 type CustomerForm = {
   name: string;
+  documentType: DocumentType;
   document: string;
   phone: string;
   city: string;
@@ -35,53 +31,22 @@ type CustomerForm = {
   creditLimit: string;
 };
 
-const initialCustomers: Customer[] = [
-  {
-    id: 1,
-    name: "Consumidor Final",
-    document: "222222222",
-    phone: "",
-    city: "Medellín",
-    address: "",
-    email: "",
-    creditLimit: 0,
-    balance: 0,
-    active: true,
-  },
-  {
-    id: 2,
-    name: "Juan Pérez",
-    document: "10203040",
-    phone: "3001234567",
-    city: "Medellín",
-    address: "San Antonio de Prado",
-    email: "juan@email.com",
-    creditLimit: 500000,
-    balance: 120000,
-    active: true,
-  },
-  {
-    id: 3,
-    name: "Café Central",
-    document: "900456789",
-    phone: "6044567890",
-    city: "Medellín",
-    address: "Centro",
-    email: "compras@cafecentral.com",
-    creditLimit: 1500000,
-    balance: 350000,
-    active: true,
-  },
-];
-
 const emptyForm: CustomerForm = {
   name: "",
+  documentType: "CC",
   document: "",
   phone: "",
   city: "",
   address: "",
   email: "",
   creditLimit: "0",
+};
+
+const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  CC: "CÃ©dula",
+  NIT: "NIT",
+  CE: "CÃ©dula extranjera",
+  PASSPORT: "Pasaporte",
 };
 
 function formatCurrency(value: number) {
@@ -93,83 +58,86 @@ function formatCurrency(value: number) {
 }
 
 export default function Customers() {
-  const [customers, setCustomers] = useState<Customer[]>(
-    initialCustomers
-  );
+  const [customers, setCustomers] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const [editingCustomer, setEditingCustomer] =
-    useState<Customer | null>(null);
-
-  const [form, setForm] = useState<CustomerForm>(emptyForm);
-
-  const [errors, setErrors] = useState<
-    Partial<Record<keyof CustomerForm, string>>
-  >({});
-
-  const [deleteCustomer, setDeleteCustomer] =
-    useState<Customer | null>(null);
-
   const [showInactive, setShowInactive] = useState(false);
 
-  const filteredCustomers = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Client | null>(null);
+  const [form, setForm] = useState<CustomerForm>(emptyForm);
+  const [errors, setErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-    return customers.filter((customer) => {
-      if (!showInactive && !customer.active) {
-        return false;
+  const [deleteCustomer, setDeleteCustomer] = useState<Client | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  /** Trae la lista segÃºn el filtro actual (bÃºsqueda en el servidor). */
+  const loadCustomers = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const all: Client[] = [];
+      // El backend limita a 100 por pÃ¡gina: recorremos todas las pÃ¡ginas.
+      for (let page = 1; ; page += 1) {
+        const result = await api.get<Paginated<Client>>(
+          `/clients${qs({
+            q: search.trim(),
+            active: showInactive ? "false" : "true",
+            page,
+            limit: 100,
+          })}`
+        );
+        all.push(...result.data);
+        if (all.length >= result.meta.total || result.data.length === 0) break;
       }
-
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return (
-        customer.name.toLowerCase().includes(normalizedSearch) ||
-        customer.document.toLowerCase().includes(normalizedSearch) ||
-        customer.phone.toLowerCase().includes(normalizedSearch) ||
-        customer.city.toLowerCase().includes(normalizedSearch)
+      setCustomers(all);
+    } catch (error) {
+      setLoadError(
+        error instanceof ApiError ? error.message : "No fue posible cargar los clientes."
       );
-    });
-  }, [customers, search, showInactive]);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, showInactive]);
 
-  const activeCustomers = customers.filter(
-    (customer) => customer.active
-  );
+  // Debounce de la bÃºsqueda: evita una peticiÃ³n por tecla.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadCustomers();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [loadCustomers]);
 
-  const totalReceivable = activeCustomers.reduce(
-    (total, customer) => total + customer.balance,
-    0
-  );
-
-  const customersWithDebt = activeCustomers.filter(
-    (customer) => customer.balance > 0
-  ).length;
+  const activeCustomers = customers.filter((customer) => customer.isActive);
+  const totalReceivable = activeCustomers.reduce((total, c) => total + c.balance, 0);
+  const customersWithDebt = activeCustomers.filter((c) => c.balance > 0).length;
 
   const openCreateModal = () => {
     setEditingCustomer(null);
     setForm(emptyForm);
     setErrors({});
+    setFormError(null);
     setIsModalOpen(true);
   };
 
-  const openEditModal = (customer: Customer) => {
+  const openEditModal = (customer: Client) => {
     setEditingCustomer(customer);
-
     setForm({
-      name: customer.name,
-      document: customer.document,
-      phone: customer.phone,
-      city: customer.city,
-      address: customer.address,
-      email: customer.email,
+      name: customer.fullName,
+      documentType: customer.documentType,
+      document: customer.documentNumber,
+      phone: customer.phone ?? "",
+      city: customer.city ?? "",
+      address: customer.address ?? "",
+      email: customer.email ?? "",
       creditLimit: String(customer.creditLimit),
     });
-
     setErrors({});
+    setFormError(null);
     setIsModalOpen(true);
   };
 
@@ -178,136 +146,89 @@ export default function Customers() {
     setEditingCustomer(null);
     setForm(emptyForm);
     setErrors({});
+    setFormError(null);
   };
 
-  const updateField = (
-    field: keyof CustomerForm,
-    value: string
-  ) => {
-    setForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
-
+  const updateField = (field: keyof CustomerForm, value: string) => {
+    setForm((previous) => ({ ...previous, [field]: value }));
     if (errors[field]) {
-      setErrors((previous) => ({
-        ...previous,
-        [field]: undefined,
-      }));
+      setErrors((previous) => ({ ...previous, [field]: undefined }));
     }
   };
 
   const validateForm = () => {
-    const newErrors: Partial<
-      Record<keyof CustomerForm, string>
-    > = {};
+    const newErrors: Partial<Record<keyof CustomerForm, string>> = {};
 
-    if (!form.name.trim()) {
-      newErrors.name = "El nombre es obligatorio.";
-    }
-
-    if (!form.document.trim()) {
-      newErrors.document = "El documento es obligatorio.";
-    }
-
+    if (!form.name.trim()) newErrors.name = "El nombre es obligatorio.";
+    if (!form.document.trim()) newErrors.document = "El documento es obligatorio.";
     if (form.phone && !/^[0-9]{7,15}$/.test(form.phone)) {
-      newErrors.phone =
-        "El teléfono debe contener entre 7 y 15 números.";
+      newErrors.phone = "El telÃ©fono debe contener entre 7 y 15 nÃºmeros.";
     }
-
-    if (
-      form.email &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)
-    ) {
-      newErrors.email = "Ingresa un correo válido.";
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      newErrors.email = "Ingresa un correo vÃ¡lido.";
     }
 
     const creditLimit = Number(form.creditLimit);
-
-    if (
-      Number.isNaN(creditLimit) ||
-      creditLimit < 0
-    ) {
-      newErrors.creditLimit =
-        "El límite de crédito no puede ser negativo.";
+    if (Number.isNaN(creditLimit) || creditLimit < 0) {
+      newErrors.creditLimit = "El lÃ­mite de crÃ©dito no puede ser negativo.";
     }
 
     setErrors(newErrors);
-
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
-    if (!validateForm()) {
-      return;
-    }
+  const handleSave = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!validateForm()) return;
 
-    const creditLimit = Number(form.creditLimit);
+    setSaving(true);
+    setFormError(null);
 
-    if (editingCustomer) {
-      setCustomers((previous) =>
-        previous.map((customer) =>
-          customer.id === editingCustomer.id
-            ? {
-                ...customer,
-                name: form.name.trim(),
-                document: form.document.trim(),
-                phone: form.phone.trim(),
-                city: form.city.trim(),
-                address: form.address.trim(),
-                email: form.email.trim(),
-                creditLimit,
-              }
-            : customer
-        )
+    const payload = {
+      documentType: form.documentType,
+      documentNumber: form.document.trim(),
+      fullName: form.name.trim(),
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+      city: form.city.trim() || null,
+      address: form.address.trim() || null,
+      creditLimit: Number(form.creditLimit),
+    };
+
+    try {
+      if (editingCustomer) {
+        await api.patch(`/clients/${editingCustomer.id}`, payload);
+      } else {
+        await api.post("/clients", payload);
+      }
+      closeModal();
+      await loadCustomers();
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError ? error.message : "No fue posible guardar el cliente."
       );
-    } else {
-      const newCustomer: Customer = {
-        id: Date.now(),
-        name: form.name.trim(),
-        document: form.document.trim(),
-        phone: form.phone.trim(),
-        city: form.city.trim(),
-        address: form.address.trim(),
-        email: form.email.trim(),
-        creditLimit,
-        balance: 0,
-        active: true,
-      };
-
-      setCustomers((previous) => [
-        ...previous,
-        newCustomer,
-      ]);
+    } finally {
+      setSaving(false);
     }
-
-    closeModal();
   };
 
-  const confirmDelete = () => {
-    if (!deleteCustomer) {
-      return;
+  const confirmDelete = async () => {
+    if (!deleteCustomer) return;
+
+    setDeleting(true);
+    setFormError(null);
+    try {
+      // Baja lÃ³gica: el cliente conserva sus facturas e historial.
+      await api.patch(`/clients/${deleteCustomer.id}/active`, { isActive: false });
+      setDeleteCustomer(null);
+      await loadCustomers();
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError ? error.message : "No fue posible desactivar el cliente."
+      );
+    } finally {
+      setDeleting(false);
     }
-
-    /*
-     * No eliminamos físicamente el cliente.
-     *
-     * Lo marcamos como inactivo para conservar su historial.
-     * Cuando conectemos el backend esto se convertirá
-     * en una operación persistente + registro de auditoría.
-     */
-    setCustomers((previous) =>
-      previous.map((customer) =>
-        customer.id === deleteCustomer.id
-          ? {
-              ...customer,
-              active: false,
-            }
-          : customer
-      )
-    );
-
-    setDeleteCustomer(null);
   };
 
   return (
@@ -433,10 +354,8 @@ export default function Customers() {
               <input
                 type="text"
                 value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Buscar por nombre, documento, teléfono o ciudad..."
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar por nombre, documento o telÃ©fono..."
                 className="
                   w-full
                   border
@@ -459,9 +378,7 @@ export default function Customers() {
               <input
                 type="checkbox"
                 checked={showInactive}
-                onChange={(event) =>
-                  setShowInactive(event.target.checked)
-                }
+                onChange={(event) => setShowInactive(event.target.checked)}
                 className="w-4 h-4 accent-[#6F4E37]"
               />
 
@@ -472,6 +389,13 @@ export default function Customers() {
           </div>
 
         </div>
+
+        {/* ERROR DE CARGA */}
+        {loadError && (
+          <div className="px-6 py-4 bg-red-50 border-b border-stone-200 text-sm text-red-600">
+            {loadError}
+          </div>
+        )}
 
         {/* TABLA */}
         <div className="overflow-x-auto">
@@ -490,11 +414,11 @@ export default function Customers() {
                 </th>
 
                 <th className="text-left px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  Ubicación
+                  UbicaciÃ³n
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  Crédito
+                  CrÃ©dito
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
@@ -514,28 +438,34 @@ export default function Customers() {
 
             <tbody>
 
-              {filteredCustomers.length === 0 ? (
+              {loading ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-16 text-center"
-                  >
-                    <Users
-                      size={38}
-                      className="mx-auto text-stone-300"
+                  <td colSpan={7} className="px-6 py-16 text-center">
+                    <Loader2
+                      size={30}
+                      className="mx-auto text-[#6F4E37] animate-spin"
                     />
+                    <p className="mt-3 text-sm text-stone-500">
+                      Cargando clientesâ€¦
+                    </p>
+                  </td>
+                </tr>
+              ) : customers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-16 text-center">
+                    <Users size={38} className="mx-auto text-stone-300" />
 
                     <p className="mt-3 font-medium text-stone-700">
                       No encontramos clientes
                     </p>
 
                     <p className="text-sm text-stone-500 mt-1">
-                      Intenta cambiar la búsqueda.
+                      Intenta cambiar la bÃºsqueda.
                     </p>
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((customer) => (
+                customers.map((customer) => (
                   <tr
                     key={customer.id}
                     className="
@@ -558,11 +488,11 @@ export default function Customers() {
 
                         <div>
                           <p className="font-semibold text-stone-800">
-                            {customer.name}
+                            {customer.fullName}
                           </p>
 
                           <p className="text-xs text-stone-500 mt-1">
-                            {customer.document}
+                            {DOCUMENT_TYPE_LABELS[customer.documentType]} {customer.documentNumber}
                           </p>
                         </div>
 
@@ -580,21 +510,24 @@ export default function Customers() {
                         </div>
                       ) : (
                         <span className="text-sm text-stone-400">
-                          Sin teléfono
+                          Sin telÃ©fono
                         </span>
+                      )}
+
+                      {customer.email && (
+                        <p className="text-xs text-stone-400 mt-1 truncate max-w-[200px]">
+                          {customer.email}
+                        </p>
                       )}
 
                     </td>
 
-                    {/* UBICACIÓN */}
+                    {/* UBICACIÃ“N */}
                     <td className="px-6 py-5">
 
                       <div className="flex items-center gap-2">
 
-                        <MapPin
-                          size={15}
-                          className="text-stone-400"
-                        />
+                        <MapPin size={15} className="text-stone-400" />
 
                         <div>
                           <p className="text-sm text-stone-700">
@@ -612,7 +545,7 @@ export default function Customers() {
 
                     </td>
 
-                    {/* CRÉDITO */}
+                    {/* CRÃ‰DITO */}
                     <td className="px-6 py-5 text-right">
 
                       <span className="text-sm text-stone-700">
@@ -641,14 +574,12 @@ export default function Customers() {
 
                       <span
                         className={
-                          customer.active
+                          customer.isActive
                             ? "inline-flex px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium"
                             : "inline-flex px-3 py-1 rounded-full bg-stone-200 text-stone-600 text-xs font-medium"
                         }
                       >
-                        {customer.active
-                          ? "Activo"
-                          : "Inactivo"}
+                        {customer.isActive ? "Activo" : "Inactivo"}
                       </span>
 
                     </td>
@@ -660,9 +591,7 @@ export default function Customers() {
 
                         <button
                           type="button"
-                          onClick={() =>
-                            openEditModal(customer)
-                          }
+                          onClick={() => openEditModal(customer)}
                           className="
                             w-9
                             h-9
@@ -680,12 +609,10 @@ export default function Customers() {
                           <Pencil size={17} />
                         </button>
 
-                        {customer.active && (
+                        {customer.isActive && (
                           <button
                             type="button"
-                            onClick={() =>
-                              setDeleteCustomer(customer)
-                            }
+                            onClick={() => setDeleteCustomer(customer)}
                             className="
                               w-9
                               h-9
@@ -698,7 +625,7 @@ export default function Customers() {
                               hover:text-red-600
                               transition
                             "
-                            title="Eliminar cliente"
+                            title="Desactivar cliente"
                           >
                             <Trash2 size={17} />
                           </button>
@@ -722,39 +649,72 @@ export default function Customers() {
 
       {/* MODAL CREAR / EDITAR */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-
-          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden">
-
-            {/* HEADER */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-stone-200">
-
-              <div>
-                <h2 className="text-xl font-bold text-stone-800">
-                  {editingCustomer
-                    ? "Editar cliente"
-                    : "Nuevo cliente"}
-                </h2>
-
-                <p className="text-sm text-stone-500 mt-1">
-                  {editingCustomer
-                    ? "Actualiza la información del cliente."
-                    : "Registra un nuevo cliente en Cheo Manager."}
-                </p>
-              </div>
+        <Modal
+          icon={Users}
+          title={editingCustomer ? "Editar cliente" : "Nuevo cliente"}
+          subtitle={
+            editingCustomer
+              ? "Actualiza la informaciÃ³n del cliente."
+              : "Registra un nuevo cliente en Cheo Manager."
+          }
+          onClose={closeModal}
+          onSubmit={handleSave}
+          size="lg"
+          footer={
+            <div className="flex justify-end gap-3">
 
               <button
                 type="button"
                 onClick={closeModal}
-                className="w-9 h-9 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"
+                className="
+                  px-5
+                  py-3
+                  rounded-xl
+                  border
+                  border-stone-300
+                  text-stone-700
+                  font-medium
+                  hover:bg-stone-50
+                  transition
+                "
               >
-                <X size={20} />
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="
+                  px-5
+                  py-3
+                  rounded-xl
+                  bg-[#6F4E37]
+                  hover:bg-[#5B3F2D]
+                  disabled:opacity-60
+                  text-white
+                  font-semibold
+                  transition
+                  inline-flex
+                  items-center
+                  gap-2
+                "
+              >
+                {saving && <Loader2 size={17} className="animate-spin" />}
+                {editingCustomer ? "Guardar cambios" : "Crear cliente"}
               </button>
 
             </div>
+          }
+        >
 
             {/* FORMULARIO */}
-            <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+            <div className="space-y-5">
+
+              {formError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                  {formError}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
@@ -762,18 +722,13 @@ export default function Customers() {
                 <div className="md:col-span-2">
 
                   <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Nombre completo / Razón social *
+                    Nombre completo / RazÃ³n social *
                   </label>
 
                   <input
                     value={form.name}
-                    onChange={(event) =>
-                      updateField(
-                        "name",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Ej. Juan Pérez"
+                    onChange={(event) => updateField("name", event.target.value)}
+                    placeholder="Ej. Juan PÃ©rez"
                     className={`
                       w-full
                       border
@@ -792,10 +747,35 @@ export default function Customers() {
                   />
 
                   {errors.name && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.name}
-                    </p>
+                    <p className="text-xs text-red-500 mt-1">{errors.name}</p>
                   )}
+
+                </div>
+
+                {/* TIPO DE DOCUMENTO */}
+                <div>
+
+                  <label className="block text-sm font-medium text-stone-700 mb-2">
+                    Tipo de documento *
+                  </label>
+
+                  <Select
+                    value={form.documentType}
+                    onChange={(value) =>
+                      updateField("documentType", value)
+                    }
+                    aria-label="Tipo de documento"
+                    options={[
+                      { value: "CC", label: "CÃ©dula", icon: CreditCard },
+                      { value: "NIT", label: "NIT", icon: Landmark },
+                      {
+                        value: "CE",
+                        label: "CÃ©dula extranjera",
+                        icon: Globe,
+                      },
+                      { value: "PASSPORT", label: "Pasaporte", icon: FileText },
+                    ]}
+                  />
 
                 </div>
 
@@ -809,12 +789,10 @@ export default function Customers() {
                   <input
                     value={form.document}
                     onChange={(event) =>
-                      updateField(
-                        "document",
-                        event.target.value
-                      )
+                      updateField("document", event.target.value.replace(/\D/g, ""))
                     }
-                    placeholder="Cédula o NIT"
+                    placeholder="CÃ©dula o NIT"
+                    inputMode="numeric"
                     className={`
                       w-full
                       border
@@ -833,31 +811,21 @@ export default function Customers() {
                   />
 
                   {errors.document && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.document}
-                    </p>
+                    <p className="text-xs text-red-500 mt-1">{errors.document}</p>
                   )}
 
                 </div>
 
-                {/* TELÉFONO */}
+                {/* TELÃ‰FONO */}
                 <div>
 
                   <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Teléfono
+                    TelÃ©fono
                   </label>
 
                   <input
                     value={form.phone}
-                    onChange={(event) =>
-                      updateField(
-                        "phone",
-                        event.target.value.replace(
-                          /\D/g,
-                          ""
-                        )
-                      )
-                    }
+                    onChange={(event) => updateField("phone", event.target.value.replace(/\D/g, ""))}
                     placeholder="Ej. 3001234567"
                     inputMode="numeric"
                     className={`
@@ -878,9 +846,7 @@ export default function Customers() {
                   />
 
                   {errors.phone && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.phone}
-                    </p>
+                    <p className="text-xs text-red-500 mt-1">{errors.phone}</p>
                   )}
 
                 </div>
@@ -894,33 +860,23 @@ export default function Customers() {
 
                   <input
                     value={form.city}
-                    onChange={(event) =>
-                      updateField(
-                        "city",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Ej. Medellín"
+                    onChange={(event) => updateField("city", event.target.value)}
+                    placeholder="Ej. MEDELLÃN"
                     className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
                   />
 
                 </div>
 
-                {/* DIRECCIÓN */}
+                {/* DIRECCIÃ“N */}
                 <div>
 
                   <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Dirección
+                    DirecciÃ³n
                   </label>
 
                   <input
                     value={form.address}
-                    onChange={(event) =>
-                      updateField(
-                        "address",
-                        event.target.value
-                      )
-                    }
+                    onChange={(event) => updateField("address", event.target.value)}
                     placeholder="Ej. Calle 10 # 20-30"
                     className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
                   />
@@ -931,18 +887,13 @@ export default function Customers() {
                 <div>
 
                   <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Correo electrónico
+                    Correo electrÃ³nico
                   </label>
 
                   <input
                     type="email"
                     value={form.email}
-                    onChange={(event) =>
-                      updateField(
-                        "email",
-                        event.target.value
-                      )
-                    }
+                    onChange={(event) => updateField("email", event.target.value)}
                     placeholder="correo@ejemplo.com"
                     className={`
                       w-full
@@ -962,18 +913,16 @@ export default function Customers() {
                   />
 
                   {errors.email && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.email}
-                    </p>
+                    <p className="text-xs text-red-500 mt-1">{errors.email}</p>
                   )}
 
                 </div>
 
-                {/* LÍMITE DE CRÉDITO */}
+                {/* LÃMITE DE CRÃ‰DITO */}
                 <div>
 
                   <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Límite de crédito
+                    LÃ­mite de crÃ©dito
                   </label>
 
                   <div className="relative">
@@ -986,12 +935,7 @@ export default function Customers() {
                       type="number"
                       min="0"
                       value={form.creditLimit}
-                      onChange={(event) =>
-                        updateField(
-                          "creditLimit",
-                          event.target.value
-                        )
-                      }
+                      onChange={(event) => updateField("creditLimit", event.target.value)}
                       className={`
                         w-full
                         border
@@ -1013,13 +957,11 @@ export default function Customers() {
                   </div>
 
                   {errors.creditLimit && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.creditLimit}
-                    </p>
+                    <p className="text-xs text-red-500 mt-1">{errors.creditLimit}</p>
                   )}
 
                   <p className="text-xs text-stone-400 mt-1">
-                    Define cuánto puede deber el cliente.
+                    Define cuÃ¡nto puede deber el cliente.
                   </p>
 
                 </div>
@@ -1028,100 +970,19 @@ export default function Customers() {
 
             </div>
 
-            {/* FOOTER */}
-            <div className="px-6 py-5 border-t border-stone-200 flex justify-end gap-3">
-
-              <button
-                type="button"
-                onClick={closeModal}
-                className="
-                  px-5
-                  py-3
-                  rounded-xl
-                  border
-                  border-stone-300
-                  text-stone-700
-                  font-medium
-                  hover:bg-stone-50
-                  transition
-                "
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSave}
-                className="
-                  px-5
-                  py-3
-                  rounded-xl
-                  bg-[#6F4E37]
-                  hover:bg-[#5B3F2D]
-                  text-white
-                  font-semibold
-                  transition
-                "
-              >
-                {editingCustomer
-                  ? "Guardar cambios"
-                  : "Crear cliente"}
-              </button>
-
-            </div>
-
-          </div>
-
-        </div>
+        </Modal>
       )}
 
-      {/* CONFIRMACIÓN DE ELIMINACIÓN */}
+      {/* CONFIRMACIÃ“N DE DESACTIVACIÃ“N */}
       {deleteCustomer && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
-
-            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-5">
-              <Trash2 size={22} />
-            </div>
-
-            <h2 className="text-xl font-bold text-stone-800">
-              ¿Eliminar cliente?
-            </h2>
-
-            <p className="text-sm text-stone-600 mt-3 leading-6">
-              Estás a punto de desactivar a{" "}
-              <strong>
-                {deleteCustomer.name}
-              </strong>
-              .
-              <br />
-              El cliente no será borrado definitivamente;
-              quedará registrado como inactivo para conservar
-              su historial.
-            </p>
-
-            {deleteCustomer.balance > 0 && (
-              <div className="mt-4 rounded-xl bg-red-50 border border-red-100 p-4">
-
-                <p className="text-sm font-semibold text-red-700">
-                  Este cliente tiene saldo pendiente
-                </p>
-
-                <p className="text-sm text-red-600 mt-1">
-                  {formatCurrency(
-                    deleteCustomer.balance
-                  )}
-                </p>
-
-                <p className="text-xs text-red-500 mt-2">
-                  La cartera asociada debe conservarse.
-                </p>
-
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3 mt-6">
+        <Modal
+          icon={Trash2}
+          title="Â¿Desactivar cliente?"
+          subtitle="El cliente quedarÃ¡ inactivo para conservar su historial."
+          onClose={() => setDeleteCustomer(null)}
+          size="sm"
+          footer={
+            <div className="flex justify-end gap-3">
 
               <button
                 type="button"
@@ -1143,26 +1004,69 @@ export default function Customers() {
 
               <button
                 type="button"
-                onClick={confirmDelete}
+                onClick={() => void confirmDelete()}
+                disabled={deleting}
                 className="
                   px-5
                   py-3
                   rounded-xl
                   bg-red-600
                   hover:bg-red-700
+                  disabled:opacity-60
                   text-white
                   font-semibold
                   transition
+                  inline-flex
+                  items-center
+                  gap-2
                 "
               >
-                Sí, desactivar
+                {deleting && <Loader2 size={17} className="animate-spin" />}
+                SÃ­, desactivar
               </button>
 
             </div>
+          }
+        >
+
+          <div className="space-y-4">
+
+            <p className="text-sm text-stone-600 mt-3 leading-6">
+              EstÃ¡s a punto de desactivar a{" "}
+              <strong>{deleteCustomer.fullName}</strong>.
+              <br />
+              El cliente no serÃ¡ borrado definitivamente;
+              quedarÃ¡ registrado como inactivo para conservar
+              su historial.
+            </p>
+
+            {deleteCustomer.balance > 0 && (
+              <div className="mt-4 rounded-xl bg-red-50 border border-red-100 p-4">
+
+                <p className="text-sm font-semibold text-red-700">
+                  Este cliente tiene saldo pendiente
+                </p>
+
+                <p className="text-sm text-red-600 mt-1">
+                  {formatCurrency(deleteCustomer.balance)}
+                </p>
+
+                <p className="text-xs text-red-500 mt-2">
+                  La cartera asociada debe conservarse.
+                </p>
+
+              </div>
+            )}
+
+            {formError && (
+              <div className="mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {formError}
+              </div>
+            )}
 
           </div>
 
-        </div>
+        </Modal>
       )}
 
     </div>

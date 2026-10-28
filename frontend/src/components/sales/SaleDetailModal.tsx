@@ -1,5 +1,6 @@
+﻿import { useEffect, useState } from "react";
+
 import {
-  X,
   Receipt,
   UserRound,
   CalendarDays,
@@ -7,32 +8,23 @@ import {
   Landmark,
   CheckCircle2,
   Clock3,
+  AlertTriangle,
+  Ban,
+  MessageCircle,
   Package,
+  Loader2,
 } from "lucide-react";
 
-type SaleItem = {
-  name: string;
-  size: string;
-  type: string;
-  quantity: number;
-  price: number;
-};
-
-type Sale = {
-  invoice: string;
-  customer: string;
-  date: string;
-  total: number;
-  payment: string;
-  status: "Pagada" | "Pendiente" | "Anulada";
-  subtotal: number;
-  discount: number;
-  bank?: string;
-  items: SaleItem[];
-};
+import { api, ApiError } from "../../lib/api";
+import Modal from "../ui/Modal";
+import {
+  INVOICE_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+} from "../../lib/labels";
+import type { Invoice } from "../../types/api";
 
 type SaleDetailModalProps = {
-  sale: Sale | null;
+  invoice: Invoice | null;
   onClose: () => void;
 };
 
@@ -44,16 +36,147 @@ function formatCurrency(value: number) {
   });
 }
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-CO");
+}
+
+/**
+ * Normaliza un celular colombiano para wa.me: solo dÃ­gitos, sin cero inicial
+ * y con prefijo 57 (R9).
+ */
+function whatsappPhone(phone: string): string {
+  let digits = phone.replace(/\D/g, "");
+
+  if (digits.startsWith("0")) {
+    digits = digits.slice(1);
+  }
+
+  if (!digits.startsWith("57")) {
+    digits = `57${digits}`;
+  }
+
+  return digits;
+}
+
 export default function SaleDetailModal({
-  sale,
+  invoice,
   onClose,
 }: SaleDetailModalProps) {
-  if (!sale) {
+  /*
+   * El detalle fresco se guarda junto al id al que pertenece: asÃ­, al cambiar
+   * de factura, los valores derivados de abajo se "resetean" solos y no hace
+   * falta (ni se permite) hacer setState sÃ­ncrono dentro del effect.
+   */
+  const [result, setResult] = useState<{
+    id: string;
+    invoice: Invoice;
+  } | null>(null);
+
+  const [failure, setFailure] = useState<{
+    id: string;
+    message: string;
+  } | null>(null);
+
+  const invoiceId = invoice?.id ?? null;
+
+  /*
+   * REFRESCA EL DETALLE (items + payments frescos)
+   */
+  useEffect(() => {
+    if (!invoiceId) return;
+
+    let cancelled = false;
+
+    api
+      .get<Invoice>(`/invoices/${invoiceId}`)
+      .then((fresh) => {
+        if (!cancelled) {
+          setResult({ id: invoiceId, invoice: fresh });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setFailure({
+            id: invoiceId,
+            message:
+              error instanceof ApiError
+                ? error.message
+                : "No fue posible cargar el detalle de la factura.",
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceId]);
+
+  const detail =
+    result && result.id === invoiceId ? result.invoice : null;
+  const loadError =
+    failure && failure.id === invoiceId ? failure.message : null;
+  const loading = Boolean(invoiceId) && !detail && !loadError;
+
+  if (!invoice) {
     return null;
   }
 
+  // Mientras carga el refresco, mostramos la factura de la lista.
+  const current = detail ?? invoice;
+
+  const getStatusIcon = () => {
+    if (current.status === "PAGADA") {
+      return (
+        <div className="w-10 h-10 rounded-xl bg-green-100 text-green-600 flex items-center justify-center">
+          <CheckCircle2 size={20} />
+        </div>
+      );
+    }
+
+    if (current.status === "PENDIENTE") {
+      return (
+        <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
+          <Clock3 size={20} />
+        </div>
+      );
+    }
+
+    if (current.status === "VENCIDA") {
+      return (
+        <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
+          <AlertTriangle size={20} />
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-10 h-10 rounded-xl bg-stone-100 text-stone-500 flex items-center justify-center">
+        <Ban size={20} />
+      </div>
+    );
+  };
+
+  const getStatusBadgeClass = () => {
+    if (current.status === "PAGADA") {
+      return "px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold";
+    }
+
+    if (current.status === "PENDIENTE") {
+      return "px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold";
+    }
+
+    if (current.status === "VENCIDA") {
+      return "px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold";
+    }
+
+    return "px-3 py-1 rounded-full bg-stone-200 text-stone-600 text-xs font-semibold line-through";
+  };
+
   const getPaymentIcon = () => {
-    if (sale.payment === "Transferencia") {
+    if (
+      current.paymentMethod === "TRANSFERENCIA" ||
+      current.paymentMethod === "CONTRA_ENTREGA"
+    ) {
       return <Landmark size={18} />;
     }
 
@@ -61,92 +184,109 @@ export default function SaleDetailModal({
   };
 
   return (
-    <div
-      className="
-        fixed
-        inset-0
-        z-50
-        bg-black/40
-        flex
-        items-center
-        justify-center
-        p-4
-      "
-      onClick={onClose}
-    >
-      <div
-        className="
-          w-full
-          max-w-2xl
-          max-h-[90vh]
-          overflow-y-auto
-          bg-white
-          rounded-2xl
-          shadow-2xl
-        "
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Modal
+      icon={Receipt}
+      title="Detalle de venta"
+      subtitle={`Factura #${current.number}`}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 
-        {/* ENCABEZADO */}
+          <p className="text-sm text-stone-500">
+            Factura creada por{" "}
+            <span className="font-semibold text-stone-700">
+              {current.createdBy.fullName}
+            </span>
+          </p>
 
-        <div className="sticky top-0 z-10 bg-white border-b border-stone-200 px-5 sm:px-6 py-4">
+          <div className="flex items-center gap-3">
 
-          <div className="flex items-center justify-between gap-4">
-
-            <div className="flex items-center gap-3">
-
-              <div
+            {current.client.phone && (
+              <a
+                href={`https://wa.me/${whatsappPhone(current.client.phone)}?text=${encodeURIComponent(
+                  `Hola ${current.client.fullName}, te compartimos el detalle de la factura ${current.number}: total ${formatCurrency(
+                    current.total
+                  )}${
+                    current.balance > 0
+                      ? ` con saldo pendiente de ${formatCurrency(current.balance)}`
+                      : " (pagada)"
+                  }. Â¡Gracias por tu compra! â˜•`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="
-                  w-10
-                  h-10
-                  rounded-xl
-                  bg-[#F3EDE7]
-                  text-[#6F4E37]
+                  w-full
+                  sm:w-auto
                   flex
                   items-center
                   justify-center
+                  gap-2
+                  px-5
+                  py-3
+                  rounded-xl
+                  bg-emerald-600
+                  hover:bg-emerald-700
+                  text-white
+                  font-semibold
+                  transition
                 "
               >
-                <Receipt size={19} />
-              </div>
-
-              <div>
-                <h2 className="text-lg font-bold text-stone-900">
-                  Detalle de venta
-                </h2>
-
-                <p className="text-sm text-stone-500">
-                  Factura {sale.invoice}
-                </p>
-              </div>
-
-            </div>
+                <MessageCircle size={18} />
+                Enviar por WhatsApp
+              </a>
+            )}
 
             <button
               type="button"
               onClick={onClose}
               className="
-                w-9
-                h-9
-                rounded-lg
-                flex
-                items-center
-                justify-center
-                text-stone-500
-                hover:bg-stone-100
+                w-full
+                sm:w-auto
+                px-5
+                py-3
+                rounded-xl
+                bg-[#6F4E37]
+                hover:bg-[#5B3F2D]
+                text-white
+                font-semibold
                 transition
               "
             >
-              <X size={20} />
+              Cerrar
             </button>
 
           </div>
 
         </div>
+      }
+    >
+      <div className="space-y-5">
 
-        <div className="p-5 sm:p-6 space-y-5">
+          {/* ERROR DE CARGA */}
 
-          {/* INFORMACIÓN GENERAL */}
+          {loadError && (
+            <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+              {loadError}
+            </div>
+          )}
+
+          {/* CARGANDO */}
+
+          {loading && !detail && (
+            <div className="py-10 text-center">
+              <Loader2
+                size={28}
+                className="mx-auto text-[#6F4E37] animate-spin"
+              />
+
+              <p className="mt-3 text-sm text-stone-500">
+                Cargando detalleâ€¦
+              </p>
+            </div>
+          )}
+
+          {/* INFORMACIÃ“N GENERAL */}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
@@ -161,7 +301,11 @@ export default function SaleDetailModal({
               </div>
 
               <p className="font-semibold text-stone-900 mt-2">
-                {sale.customer}
+                {current.client.fullName}
+              </p>
+
+              <p className="text-sm text-stone-500 mt-1">
+                CC/NIT {current.client.documentNumber}
               </p>
 
             </div>
@@ -172,19 +316,23 @@ export default function SaleDetailModal({
                 <CalendarDays size={17} />
 
                 <span className="text-sm">
-                  Fecha
+                  Fechas
                 </span>
               </div>
 
               <p className="font-semibold text-stone-900 mt-2">
-                {sale.date}
+                {formatDate(current.issueDate)}
+              </p>
+
+              <p className="text-sm text-stone-500 mt-1">
+                Vence: {formatDate(current.dueDate)}
               </p>
 
             </div>
 
           </div>
 
-          {/* ESTADO */}
+          {/* ESTADO Y MÃ‰TODO */}
 
           <div className="border border-stone-200 rounded-xl p-4">
 
@@ -192,23 +340,7 @@ export default function SaleDetailModal({
 
               <div className="flex items-center gap-3">
 
-                {sale.status === "Pagada" && (
-                  <div className="w-10 h-10 rounded-xl bg-green-100 text-green-600 flex items-center justify-center">
-                    <CheckCircle2 size={20} />
-                  </div>
-                )}
-
-                {sale.status === "Pendiente" && (
-                  <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
-                    <Clock3 size={20} />
-                  </div>
-                )}
-
-                {sale.status === "Anulada" && (
-                  <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
-                    <X size={20} />
-                  </div>
-                )}
+                {getStatusIcon()}
 
                 <div>
                   <p className="text-sm text-stone-500">
@@ -216,29 +348,33 @@ export default function SaleDetailModal({
                   </p>
 
                   <p className="font-semibold text-stone-900 mt-1">
-                    {sale.status}
+                    {INVOICE_STATUS_LABELS[current.status]}
                   </p>
                 </div>
 
               </div>
 
-              {sale.status === "Pagada" && (
-                <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">
-                  Pagada
-                </span>
-              )}
+              <span className={getStatusBadgeClass()}>
+                {INVOICE_STATUS_LABELS[current.status]}
+              </span>
 
-              {sale.status === "Pendiente" && (
-                <span className="px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold">
-                  Pendiente
-                </span>
-              )}
+            </div>
 
-              {sale.status === "Anulada" && (
-                <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
-                  Anulada
+            <div className="border-t border-stone-100 mt-4 pt-4 flex items-center justify-between">
+
+              <div className="flex items-center gap-2 text-stone-500">
+                <div className="text-[#6F4E37]">
+                  {getPaymentIcon()}
+                </div>
+
+                <span className="text-sm">
+                  MÃ©todo de pago
                 </span>
-              )}
+              </div>
+
+              <span className="font-semibold text-stone-900">
+                {PAYMENT_METHOD_LABELS[current.paymentMethod]}
+              </span>
 
             </div>
 
@@ -261,89 +397,82 @@ export default function SaleDetailModal({
 
             </div>
 
-            <div className="divide-y divide-stone-100">
+            {current.items && current.items.length > 0 ? (
 
-              {sale.items.map((item, index) => (
+              <div className="overflow-x-auto">
 
-                <div
-                  key={`${item.name}-${item.size}-${index}`}
-                  className="p-4"
-                >
+                <table className="w-full min-w-[480px]">
 
-                  <div className="flex items-start justify-between gap-4">
+                  <thead>
 
-                    <div>
+                    <tr className="bg-stone-50 border-b border-stone-200">
 
-                      <p className="font-semibold text-stone-900">
-                        {item.name}
-                      </p>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase">
+                        Producto
+                      </th>
 
-                      <p className="text-sm text-stone-500 mt-1">
-                        {item.size} · {item.type}
-                      </p>
+                      <th className="text-center px-4 py-3 text-xs font-semibold text-stone-500 uppercase">
+                        Cant.
+                      </th>
 
-                      <p className="text-sm text-stone-500 mt-1">
-                        {item.quantity} ×{" "}
-                        {formatCurrency(item.price)}
-                      </p>
+                      <th className="text-right px-4 py-3 text-xs font-semibold text-stone-500 uppercase">
+                        Precio unitario
+                      </th>
 
-                    </div>
+                      <th className="text-right px-4 py-3 text-xs font-semibold text-stone-500 uppercase">
+                        Subtotal
+                      </th>
 
-                    <p className="font-semibold text-stone-900">
-                      {formatCurrency(
-                        item.quantity * item.price
-                      )}
-                    </p>
+                    </tr>
 
-                  </div>
+                  </thead>
 
-                </div>
+                  <tbody>
 
-              ))}
+                    {current.items.map((item) => (
 
-            </div>
+                      <tr
+                        key={item.id}
+                        className="border-b border-stone-100 last:border-0"
+                      >
 
-          </div>
+                        <td className="px-4 py-3">
 
-          {/* PAGO */}
+                          <p className="font-semibold text-stone-900">
+                            {item.productName}
+                          </p>
 
-          <div className="border border-stone-200 rounded-xl p-4">
+                          <p className="text-sm text-stone-500 mt-0.5">
+                            {item.presentationLabel}
+                          </p>
 
-            <div className="flex items-center gap-2">
+                        </td>
 
-              <div className="text-[#6F4E37]">
-                {getPaymentIcon()}
+                        <td className="px-4 py-3 text-center text-sm text-stone-700">
+                          {item.quantity}
+                        </td>
+
+                        <td className="px-4 py-3 text-right text-sm text-stone-700">
+                          {formatCurrency(item.unitPrice)}
+                        </td>
+
+                        <td className="px-4 py-3 text-right font-semibold text-stone-900">
+                          {formatCurrency(item.subtotal)}
+                        </td>
+
+                      </tr>
+
+                    ))}
+
+                  </tbody>
+
+                </table>
+
               </div>
 
-              <h3 className="font-semibold text-stone-900">
-                Forma de pago
-              </h3>
-
-            </div>
-
-            <div className="mt-4 flex items-center justify-between">
-
-              <span className="text-stone-500">
-                Método
-              </span>
-
-              <span className="font-semibold text-stone-900">
-                {sale.payment}
-              </span>
-
-            </div>
-
-            {sale.bank && (
-              <div className="mt-3 flex items-center justify-between">
-
-                <span className="text-stone-500">
-                  Cuenta
-                </span>
-
-                <span className="font-semibold text-stone-900 text-right">
-                  {sale.bank}
-                </span>
-
+            ) : (
+              <div className="px-4 py-6 text-center text-sm text-stone-500">
+                Sin productos para mostrar.
               </div>
             )}
 
@@ -360,7 +489,7 @@ export default function SaleDetailModal({
               </span>
 
               <span className="font-medium text-stone-800">
-                {formatCurrency(sale.subtotal)}
+                {formatCurrency(current.subtotal)}
               </span>
 
             </div>
@@ -372,7 +501,19 @@ export default function SaleDetailModal({
               </span>
 
               <span className="font-medium text-stone-800">
-                - {formatCurrency(sale.discount)}
+                - {formatCurrency(current.discount)}
+              </span>
+
+            </div>
+
+            <div className="flex items-center justify-between mt-3">
+
+              <span className="text-stone-600">
+                Total abonado
+              </span>
+
+              <span className="font-medium text-stone-800">
+                {formatCurrency(current.totalPaid)}
               </span>
 
             </div>
@@ -384,41 +525,102 @@ export default function SaleDetailModal({
               </span>
 
               <span className="text-2xl font-bold text-[#6F4E37]">
-                {formatCurrency(sale.total)}
+                {formatCurrency(current.total)}
+              </span>
+
+            </div>
+
+            <div className="flex items-center justify-between mt-3">
+
+              <span className="text-stone-600">
+                Saldo pendiente
+              </span>
+
+              <span
+                className={
+                  current.balance > 0
+                    ? "font-bold text-red-600"
+                    : "font-bold text-green-600"
+                }
+              >
+                {formatCurrency(current.balance)}
               </span>
 
             </div>
 
           </div>
 
-        </div>
+          {/* ABONOS */}
 
-        {/* PIE */}
+          <div className="border border-stone-200 rounded-xl overflow-hidden">
 
-        <div className="border-t border-stone-200 px-5 sm:px-6 py-4 flex justify-end">
+            <div className="px-4 py-4 border-b border-stone-200">
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="
-              w-full
-              sm:w-auto
-              px-5
-              py-3
-              rounded-xl
-              bg-[#6F4E37]
-              hover:bg-[#5B3F2D]
-              text-white
-              font-semibold
-              transition
-            "
-          >
-            Cerrar
-          </button>
+              <h3 className="font-semibold text-stone-900">
+                Abonos registrados
+              </h3>
 
-        </div>
+            </div>
+
+            {current.payments.length > 0 ? (
+
+              <div className="divide-y divide-stone-100">
+
+                {current.payments.map((payment) => (
+
+                  <div
+                    key={payment.id}
+                    className="px-4 py-3 flex items-center justify-between gap-4"
+                  >
+
+                    <div>
+
+                      <p className="text-sm font-medium text-stone-800">
+                        {formatDate(payment.paidAt)}
+                      </p>
+
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        {PAYMENT_METHOD_LABELS[payment.method]}
+                        {payment.notes ? ` Â· ${payment.notes}` : ""}
+                      </p>
+
+                    </div>
+
+                    <p className="font-semibold text-stone-900">
+                      {formatCurrency(payment.amount)}
+                    </p>
+
+                  </div>
+
+                ))}
+
+              </div>
+
+            ) : (
+              <div className="px-4 py-6 text-center text-sm text-stone-500">
+                Sin abonos registrados.
+              </div>
+            )}
+
+          </div>
+
+          {current.notes && (
+
+            <div className="border border-stone-200 rounded-xl p-4">
+
+              <p className="text-sm text-stone-500">
+                Notas
+              </p>
+
+              <p className="text-stone-800 mt-1">
+                {current.notes}
+              </p>
+
+            </div>
+
+          )}
 
       </div>
-    </div>
+    </Modal>
   );
 }

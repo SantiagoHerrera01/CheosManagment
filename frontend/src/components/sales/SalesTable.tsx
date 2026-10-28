@@ -1,215 +1,38 @@
 import {
   MoreVertical,
   Eye,
-  Pencil,
-  Trash2,
-  UserRound,
+  HandCoins,
+  Banknote,
+  Landmark,
+  Ban,
   Receipt,
+  UserRound,
   AlertTriangle,
-  X,
+  Loader2,
 } from "lucide-react";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+
+import { api, ApiError } from "../../lib/api";
+import type {
+  Invoice,
+  InvoiceStatus,
+} from "../../types/api";
 
 import SaleDetailModal from "./SaleDetailModal";
-import EditSale, {
-  type EditableSale,
-} from "./EditSale";
+import { INVOICE_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "../../lib/labels";
 
-type SaleItem = {
-  name: string;
-  size: string;
-  type: string;
-  quantity: number;
-  price: number;
-  cost?: number;
+import Select from "../ui/Select";
+import Modal from "../ui/Modal";
+
+type PayMethod = "ABONO" | "EFECTIVO" | "TRANSFERENCIA";
+
+type SalesTableProps = {
+  invoices: Invoice[];
+  loading: boolean;
+  error: string | null;
+  reload: () => void;
 };
-
-export type Sale = {
-  id: number;
-  invoice: string;
-  customer: string;
-  date: string;
-  total: number;
-  payment: string;
-  status: "Pagada" | "Pendiente" | "Anulada";
-  subtotal: number;
-  discount: number;
-  bank?: string;
-  items: SaleItem[];
-};
-
-const initialSales: Sale[] = [
-  {
-    id: 1,
-    invoice: "#000125",
-    customer: "Juan Pérez",
-    date: "14/08/2026",
-    total: 85000,
-    payment: "Efectivo",
-    status: "Pagada",
-    subtotal: 85000,
-    discount: 0,
-    items: [
-      {
-        name: "Castillo",
-        size: "500 g",
-        type: "Molido",
-        quantity: 1,
-        price: 40000,
-      },
-      {
-        name: "Chiroso Urrao",
-        size: "250 g",
-        type: "Grano",
-        quantity: 1,
-        price: 35000,
-      },
-      {
-        name: "Castillo",
-        size: "125 g",
-        type: "Molido",
-        quantity: 1,
-        price: 10000,
-      },
-    ],
-  },
-
-  {
-    id: 2,
-    invoice: "#000124",
-    customer: "Tienda La 80",
-    date: "14/08/2026",
-    total: 240000,
-    payment: "Crédito",
-    status: "Pendiente",
-    subtotal: 240000,
-    discount: 0,
-    items: [
-      {
-        name: "Castillo",
-        size: "500 g",
-        type: "Grano",
-        quantity: 6,
-        price: 40000,
-      },
-    ],
-  },
-
-  {
-    id: 3,
-    invoice: "#000123",
-    customer: "María Gómez",
-    date: "13/08/2026",
-    total: 120000,
-    payment: "Transferencia",
-    status: "Pagada",
-    subtotal: 125000,
-    discount: 5000,
-    bank: "Bancolombia Cta Cheo",
-    items: [
-      {
-        name: "Papayo Honey",
-        size: "250 g",
-        type: "Molido",
-        quantity: 2,
-        price: 35000,
-      },
-      {
-        name: "Bourbon Rosado Honey",
-        size: "250 g",
-        type: "Grano",
-        quantity: 1,
-        price: 40000,
-      },
-      {
-        name: "Castillo",
-        size: "125 g",
-        type: "Molido",
-        quantity: 1,
-        price: 15000,
-      },
-    ],
-  },
-
-  {
-    id: 4,
-    invoice: "#000122",
-    customer: "Café La Montaña",
-    date: "13/08/2026",
-    total: 385000,
-    payment: "Transferencia",
-    status: "Pagada",
-    subtotal: 385000,
-    discount: 0,
-    bank: "Bancolombia Cta Omar",
-    items: [
-      {
-        name: "Castillo",
-        size: "2.5 kg",
-        type: "Grano",
-        quantity: 2,
-        price: 140000,
-      },
-      {
-        name: "Chiroso Urrao",
-        size: "250 g",
-        type: "Grano",
-        quantity: 3,
-        price: 35000,
-      },
-    ],
-  },
-
-  {
-    id: 5,
-    invoice: "#000121",
-    customer: "Distribuciones El Café",
-    date: "12/08/2026",
-    total: 560000,
-    payment: "Crédito",
-    status: "Pendiente",
-    subtotal: 560000,
-    discount: 0,
-    items: [
-      {
-        name: "Castillo",
-        size: "500 g",
-        type: "Molido",
-        quantity: 14,
-        price: 40000,
-      },
-    ],
-  },
-
-  {
-    id: 6,
-    invoice: "#000120",
-    customer: "Pedro Ramírez",
-    date: "12/08/2026",
-    total: 95000,
-    payment: "Efectivo",
-    status: "Anulada",
-    subtotal: 95000,
-    discount: 0,
-    items: [
-      {
-        name: "Castillo",
-        size: "500 g",
-        type: "Grano",
-        quantity: 2,
-        price: 40000,
-      },
-      {
-        name: "Castillo",
-        size: "125 g",
-        type: "Molido",
-        quantity: 1,
-        price: 15000,
-      },
-    ],
-  },
-];
 
 function formatCurrency(value: number) {
   return value.toLocaleString("es-CO", {
@@ -219,188 +42,193 @@ function formatCurrency(value: number) {
   });
 }
 
-function getCustomerData(customerName: string) {
-  const customers: Record<
-    string,
-    {
-      id: number;
-      document: string;
-    }
-  > = {
-    "Juan Pérez": {
-      id: 2,
-      document: "10203040",
-    },
-
-    "Tienda La 80": {
-      id: 4,
-      document: "901234567",
-    },
-
-    "María Gómez": {
-      id: 5,
-      document: "100203040",
-    },
-
-    "Café La Montaña": {
-      id: 6,
-      document: "900555666",
-    },
-
-    "Distribuciones El Café": {
-      id: 7,
-      document: "901777888",
-    },
-
-    "Pedro Ramírez": {
-      id: 8,
-      document: "1030405060",
-    },
-  };
-
-  const customer = customers[customerName];
-
-  return {
-    id: customer?.id ?? 1,
-    name: customerName,
-    document: customer?.document ?? "222222222",
-  };
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-CO");
 }
 
-function getPaymentMethod(
-  payment: string
-): EditableSale["paymentMethod"] {
-  if (payment === "Transferencia") {
-    return "transferencia";
+function statusBadgeClass(status: InvoiceStatus) {
+  if (status === "PAGADA") {
+    return "inline-flex px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold";
   }
 
-  if (payment === "Crédito") {
-    return "credito";
+  if (status === "PENDIENTE") {
+    return "inline-flex px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold";
   }
 
-  if (payment === "Contra entrega") {
-    return "contra_entrega";
+  if (status === "VENCIDA") {
+    return "inline-flex px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold";
   }
 
-  if (payment === "Abono") {
-    return "abono";
-  }
-
-  return "efectivo";
+  return "inline-flex px-3 py-1 rounded-full bg-stone-200 text-stone-600 text-xs font-semibold line-through";
 }
 
-export default function SalesTable() {
-  const [sales, setSales] =
-    useState<Sale[]>(initialSales);
-
+export default function SalesTable({
+  invoices,
+  loading,
+  error,
+  reload,
+}: SalesTableProps) {
   const [openMenu, setOpenMenu] =
-    useState<number | null>(null);
+    useState<string | null>(null);
 
-  const [selectedSale, setSelectedSale] =
-    useState<Sale | null>(null);
+  const [selectedInvoice, setSelectedInvoice] =
+    useState<Invoice | null>(null);
 
-  const [editingSale, setEditingSale] =
-    useState<EditableSale | null>(null);
+  /*
+   * REGISTRAR ABONO
+   */
+  const [payingInvoice, setPayingInvoice] =
+    useState<Invoice | null>(null);
 
-  const [saleToDelete, setSaleToDelete] =
-    useState<Sale | null>(null);
+  const [payAmount, setPayAmount] =
+    useState("");
+
+  const [payMethod, setPayMethod] =
+    useState<PayMethod>("ABONO");
+
+  const [payNotes, setPayNotes] =
+    useState("");
+
+  const [paySaving, setPaySaving] =
+    useState(false);
+
+  const [payError, setPayError] =
+    useState<string | null>(null);
+
+  /*
+   * ANULAR FACTURA
+   */
+  const [voidingInvoice, setVoidingInvoice] =
+    useState<Invoice | null>(null);
+
+  const [voidReason, setVoidReason] =
+    useState("");
+
+  const [voidSaving, setVoidSaving] =
+    useState(false);
+
+  const [voidError, setVoidError] =
+    useState<string | null>(null);
 
   /*
    * VER DETALLE
    */
-  const handleViewSale = (sale: Sale) => {
-    setSelectedSale(sale);
+  const handleViewInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
     setOpenMenu(null);
   };
 
   /*
-   * EDITAR VENTA
+   * ABRIR MODAL DE ABONO
    */
-  const handleEditSale = (sale: Sale) => {
-    const editableSale: EditableSale = {
-      id: sale.id,
-
-      invoice: sale.invoice,
-
-      customer: getCustomerData(
-        sale.customer
-      ),
-
-      items: sale.items.map(
-        (item, index) => ({
-          id: `${sale.id}-${index}`,
-
-          productId: index + 1,
-
-          name: item.name,
-
-          size: item.size,
-
-          type: item.type,
-
-          price: item.price,
-
-          cost: item.cost ?? 0,
-
-          quantity: item.quantity,
-        })
-      ),
-
-      discount: sale.discount,
-
-      paymentMethod: getPaymentMethod(
-        sale.payment
-      ),
-
-      bank: sale.bank,
-    };
-
-    setEditingSale(editableSale);
+  const handleOpenPay = (invoice: Invoice) => {
+    setPayingInvoice(invoice);
+    setPayAmount("");
+    setPayMethod("ABONO");
+    setPayNotes("");
+    setPayError(null);
     setOpenMenu(null);
   };
 
   /*
-   * ABRIR CONFIRMACIÓN
+   * CONFIRMAR ABONO
    */
-  const handleDeleteRequest = (sale: Sale) => {
-    setSaleToDelete(sale);
-    setOpenMenu(null);
-  };
+  const handlePaySubmit = async (event: FormEvent) => {
+    event.preventDefault();
 
-  /*
-   * CONFIRMAR ELIMINACIÓN
-   */
-  const handleConfirmDelete = () => {
-    if (!saleToDelete) {
+    if (!payingInvoice) {
       return;
     }
 
-    setSales((currentSales) =>
-      currentSales.filter(
-        (sale) =>
-          sale.id !== saleToDelete.id
-      )
-    );
+    const amount = Number(payAmount);
 
-    setSaleToDelete(null);
+    if (!payAmount || Number.isNaN(amount) || amount <= 0) {
+      setPayError("Ingresa un monto mayor a cero.");
+      return;
+    }
+
+    if (amount > payingInvoice.balance) {
+      setPayError(
+        `El monto no puede superar el saldo pendiente (${formatCurrency(payingInvoice.balance)}).`
+      );
+      return;
+    }
+
+    setPaySaving(true);
+    setPayError(null);
+
+    try {
+      await api.post<Invoice>(
+        `/invoices/${payingInvoice.id}/payments`,
+        {
+          amount,
+          method: payMethod,
+          notes: payNotes.trim() || undefined,
+        }
+      );
+
+      setPayingInvoice(null);
+      reload();
+    } catch (error) {
+      setPayError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible registrar el abono."
+      );
+    } finally {
+      setPaySaving(false);
+    }
   };
 
   /*
-   * SI ESTAMOS EDITANDO
+   * ABRIR MODAL DE ANULACIÓN
    */
-  if (editingSale) {
-    return (
-      <EditSale
-        sale={editingSale}
-        onBack={() =>
-          setEditingSale(null)
-        }
-        onSaved={() =>
-          setEditingSale(null)
-        }
-      />
-    );
-  }
+  const handleOpenVoid = (invoice: Invoice) => {
+    setVoidingInvoice(invoice);
+    setVoidReason("");
+    setVoidError(null);
+    setOpenMenu(null);
+  };
+
+  /*
+   * CONFIRMAR ANULACIÓN
+   */
+  const handleVoidSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!voidingInvoice) {
+      return;
+    }
+
+    if (voidReason.trim().length < 3) {
+      setVoidError(
+        "El motivo debe tener al menos 3 caracteres."
+      );
+      return;
+    }
+
+    setVoidSaving(true);
+    setVoidError(null);
+
+    try {
+      await api.post(
+        `/invoices/${voidingInvoice.id}/void`,
+        { reason: voidReason.trim() }
+      );
+
+      setVoidingInvoice(null);
+      reload();
+    } catch (error) {
+      // El backend responde 403 si el rol no puede anular: mostramos su mensaje.
+      setVoidError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible anular la factura."
+      );
+    } finally {
+      setVoidSaving(false);
+    }
+  };
 
   return (
     <>
@@ -433,16 +261,24 @@ export default function SalesTable() {
           </div>
 
           <span className="text-sm text-stone-500 whitespace-nowrap">
-            {sales.length} ventas
+            {invoices.length} facturas
           </span>
 
         </div>
+
+        {/* ERROR DE CARGA */}
+
+        {error && (
+          <div className="px-6 py-4 bg-red-50 border-b border-stone-200 text-sm text-red-600">
+            {error}
+          </div>
+        )}
 
         {/* TABLA */}
 
         <div className="overflow-x-auto">
 
-          <table className="w-full min-w-[900px]">
+          <table className="w-full min-w-[980px]">
 
             <thead>
 
@@ -468,6 +304,10 @@ export default function SalesTable() {
                   Total
                 </th>
 
+                <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
+                  Saldo
+                </th>
+
                 <th className="text-center px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
                   Estado
                 </th>
@@ -481,254 +321,30 @@ export default function SalesTable() {
 
             <tbody>
 
-              {sales.map((sale) => (
+              {loading ? (
 
-                <tr
-                  key={sale.id}
-                  className="
-                    border-b
-                    border-stone-100
-                    last:border-0
-                    hover:bg-stone-50
-                    transition
-                  "
-                >
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-6 py-16 text-center"
+                  >
+                    <Loader2
+                      size={30}
+                      className="mx-auto text-[#6F4E37] animate-spin"
+                    />
 
-                  {/* FACTURA */}
-
-                  <td className="px-6 py-5">
-
-                    <div className="flex items-center gap-3">
-
-                      <div className="w-9 h-9 rounded-lg bg-stone-100 text-stone-600 flex items-center justify-center">
-                        <Receipt size={16} />
-                      </div>
-
-                      <span className="font-semibold text-stone-800">
-                        {sale.invoice}
-                      </span>
-
-                    </div>
-
+                    <p className="mt-3 text-sm text-stone-500">
+                      Cargando facturas…
+                    </p>
                   </td>
-
-                  {/* CLIENTE */}
-
-                  <td className="px-6 py-5">
-
-                    <div className="flex items-center gap-3">
-
-                      <div className="w-9 h-9 rounded-full bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
-                        <UserRound size={16} />
-                      </div>
-
-                      <span className="font-medium text-stone-800">
-                        {sale.customer}
-                      </span>
-
-                    </div>
-
-                  </td>
-
-                  {/* FECHA */}
-
-                  <td className="px-6 py-5 text-sm text-stone-600">
-                    {sale.date}
-                  </td>
-
-                  {/* PAGO */}
-
-                  <td className="px-6 py-5">
-
-                    <span className="text-sm text-stone-700">
-                      {sale.payment}
-                    </span>
-
-                    {sale.bank && (
-                      <p className="text-xs text-stone-400 mt-1">
-                        {sale.bank}
-                      </p>
-                    )}
-
-                  </td>
-
-                  {/* TOTAL */}
-
-                  <td className="px-6 py-5 text-right">
-
-                    <span className="font-semibold text-stone-800">
-                      {formatCurrency(
-                        sale.total
-                      )}
-                    </span>
-
-                  </td>
-
-                  {/* ESTADO */}
-
-                  <td className="px-6 py-5 text-center">
-
-                    {sale.status ===
-                      "Pagada" && (
-                      <span className="inline-flex px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">
-                        Pagada
-                      </span>
-                    )}
-
-                    {sale.status ===
-                      "Pendiente" && (
-                      <span className="inline-flex px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold">
-                        Pendiente
-                      </span>
-                    )}
-
-                    {sale.status ===
-                      "Anulada" && (
-                      <span className="inline-flex px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
-                        Anulada
-                      </span>
-                    )}
-
-                  </td>
-
-                  {/* ACCIONES */}
-
-                  <td className="px-6 py-5 relative">
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOpenMenu(
-                          openMenu === sale.id
-                            ? null
-                            : sale.id
-                        )
-                      }
-                      className="
-                        w-9
-                        h-9
-                        rounded-lg
-                        flex
-                        items-center
-                        justify-center
-                        text-stone-500
-                        hover:bg-stone-100
-                      "
-                    >
-                      <MoreVertical size={19} />
-                    </button>
-
-                    {openMenu === sale.id && (
-
-                      <div
-                        className="
-                          absolute
-                          right-6
-                          top-14
-                          z-30
-                          w-44
-                          bg-white
-                          border
-                          border-stone-200
-                          rounded-xl
-                          shadow-lg
-                          py-1
-                        "
-                      >
-
-                        {/* VER DETALLE */}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleViewSale(
-                              sale
-                            )
-                          }
-                          className="
-                            w-full
-                            flex
-                            items-center
-                            gap-3
-                            px-4
-                            py-2.5
-                            text-sm
-                            text-stone-700
-                            hover:bg-stone-50
-                          "
-                        >
-                          <Eye size={16} />
-                          Ver detalle
-                        </button>
-
-                        {/* EDITAR */}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleEditSale(
-                              sale
-                            )
-                          }
-                          className="
-                            w-full
-                            flex
-                            items-center
-                            gap-3
-                            px-4
-                            py-2.5
-                            text-sm
-                            text-stone-700
-                            hover:bg-stone-50
-                          "
-                        >
-                          <Pencil size={16} />
-                          Editar venta
-                        </button>
-
-                        <div className="border-t border-stone-100 my-1" />
-
-                        {/* ELIMINAR */}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleDeleteRequest(
-                              sale
-                            )
-                          }
-                          className="
-                            w-full
-                            flex
-                            items-center
-                            gap-3
-                            px-4
-                            py-2.5
-                            text-sm
-                            text-red-600
-                            hover:bg-red-50
-                          "
-                        >
-                          <Trash2 size={16} />
-                          Eliminar venta
-                        </button>
-
-                      </div>
-
-                    )}
-
-                  </td>
-
                 </tr>
 
-              ))}
-
-              {sales.length === 0 && (
+              ) : invoices.length === 0 ? (
 
                 <tr>
 
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-6 py-12 text-center"
                   >
 
@@ -739,7 +355,7 @@ export default function SalesTable() {
                       </div>
 
                       <p className="font-semibold text-stone-700 mt-4">
-                        No hay ventas registradas
+                        No hay facturas registradas
                       </p>
 
                       <p className="text-sm text-stone-500 mt-1">
@@ -752,6 +368,257 @@ export default function SalesTable() {
                   </td>
 
                 </tr>
+
+              ) : (
+
+                invoices.map((invoice) => (
+
+                  <tr
+                    key={invoice.id}
+                    className="
+                      border-b
+                      border-stone-100
+                      last:border-0
+                      hover:bg-stone-50
+                      transition
+                    "
+                  >
+
+                    {/* FACTURA */}
+
+                    <td className="px-6 py-5">
+
+                      <div className="flex items-center gap-3">
+
+                        <div className="w-9 h-9 rounded-lg bg-stone-100 text-stone-600 flex items-center justify-center">
+                          <Receipt size={16} />
+                        </div>
+
+                        <span className="font-semibold text-stone-800">
+                          #{invoice.number}
+                        </span>
+
+                      </div>
+
+                    </td>
+
+                    {/* CLIENTE */}
+
+                    <td className="px-6 py-5">
+
+                      <div className="flex items-center gap-3">
+
+                        <div className="w-9 h-9 rounded-full bg-[#F3EDE7] text-[#6F4E37] flex items-center justify-center">
+                          <UserRound size={16} />
+                        </div>
+
+                        <span className="font-medium text-stone-800">
+                          {invoice.client.fullName}
+                        </span>
+
+                      </div>
+
+                    </td>
+
+                    {/* FECHA */}
+
+                    <td className="px-6 py-5 text-sm text-stone-600">
+                      {formatDate(invoice.issueDate)}
+                    </td>
+
+                    {/* PAGO */}
+
+                    <td className="px-6 py-5">
+
+                      <span className="text-sm text-stone-700">
+                        {PAYMENT_METHOD_LABELS[invoice.paymentMethod]}
+                      </span>
+
+                    </td>
+
+                    {/* TOTAL */}
+
+                    <td className="px-6 py-5 text-right">
+
+                      <span className="font-semibold text-stone-800">
+                        {formatCurrency(invoice.total)}
+                      </span>
+
+                    </td>
+
+                    {/* SALDO */}
+
+                    <td className="px-6 py-5 text-right">
+
+                      <span
+                        className={
+                          invoice.balance > 0
+                            ? "text-sm font-semibold text-red-600"
+                            : "text-sm font-medium text-green-600"
+                        }
+                      >
+                        {formatCurrency(invoice.balance)}
+                      </span>
+
+                    </td>
+
+                    {/* ESTADO */}
+
+                    <td className="px-6 py-5 text-center">
+
+                      <span
+                        className={statusBadgeClass(invoice.status)}
+                      >
+                        {INVOICE_STATUS_LABELS[invoice.status]}
+                      </span>
+
+                    </td>
+
+                    {/* ACCIONES */}
+
+                    <td className="px-6 py-5 relative">
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenMenu(
+                            openMenu === invoice.id
+                              ? null
+                              : invoice.id
+                          )
+                        }
+                        className="
+                          w-9
+                          h-9
+                          rounded-lg
+                          flex
+                          items-center
+                          justify-center
+                          text-stone-500
+                          hover:bg-stone-100
+                        "
+                      >
+                        <MoreVertical size={19} />
+                      </button>
+
+                      {openMenu === invoice.id && (
+
+                        <div
+                          className="
+                            absolute
+                            right-6
+                            top-14
+                            z-30
+                            w-48
+                            bg-white
+                            border
+                            border-stone-200
+                            rounded-xl
+                            shadow-lg
+                            py-1
+                          "
+                        >
+
+                          {/* VER DETALLE */}
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleViewInvoice(
+                                invoice
+                              )
+                            }
+                            className="
+                              w-full
+                              flex
+                              items-center
+                              gap-3
+                              px-4
+                              py-2.5
+                              text-sm
+                              text-stone-700
+                              hover:bg-stone-50
+                            "
+                          >
+                            <Eye size={16} />
+                            Ver detalle
+                          </button>
+
+                          {/* REGISTRAR ABONO */}
+
+                          {(invoice.status === "PENDIENTE" ||
+                            invoice.status === "VENCIDA") &&
+                            invoice.balance > 0 && (
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleOpenPay(
+                                  invoice
+                                )
+                              }
+                              className="
+                                w-full
+                                flex
+                                items-center
+                                gap-3
+                                px-4
+                                py-2.5
+                                text-sm
+                                text-stone-700
+                                hover:bg-stone-50
+                              "
+                            >
+                              <HandCoins size={16} />
+                              Registrar abono
+                            </button>
+
+                          )}
+
+                          {/* ANULAR */}
+
+                          {invoice.status !== "ANULADA" && (
+
+                            <>
+
+                              <div className="border-t border-stone-100 my-1" />
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenVoid(
+                                    invoice
+                                  )
+                                }
+                                className="
+                                  w-full
+                                  flex
+                                  items-center
+                                  gap-3
+                                  px-4
+                                  py-2.5
+                                  text-sm
+                                  text-red-600
+                                  hover:bg-red-50
+                                "
+                              >
+                                <Ban size={16} />
+                                Anular factura
+                              </button>
+
+                            </>
+
+                          )}
+
+                        </div>
+
+                      )}
+
+                    </td>
+
+                  </tr>
+
+                ))
 
               )}
 
@@ -768,214 +635,30 @@ export default function SalesTable() {
       ========================================= */}
 
       <SaleDetailModal
-        sale={selectedSale}
+        invoice={selectedInvoice}
         onClose={() =>
-          setSelectedSale(null)
+          setSelectedInvoice(null)
         }
       />
 
       {/* =========================================
-          MODAL ELIMINAR
+          MODAL REGISTRAR ABONO
       ========================================= */}
 
-      {saleToDelete && (
+      {payingInvoice && (
 
-        <div
-          className="
-            fixed
-            inset-0
-            z-[60]
-            bg-black/40
-            flex
-            items-center
-            justify-center
-            p-4
-          "
-          onClick={() =>
-            setSaleToDelete(null)
+        <Modal
+          icon={HandCoins}
+          title="Registrar abono"
+          subtitle={`Factura #${payingInvoice.number}`}
+          onClose={() =>
+            setPayingInvoice(null)
           }
-        >
-
-          <div
-            className="
-              w-full
-              max-w-md
-              bg-white
-              rounded-2xl
-              shadow-2xl
-              overflow-hidden
-            "
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-
-            {/* ENCABEZADO */}
-
-            <div className="p-5 sm:p-6 border-b border-stone-200">
-
-              <div className="flex items-start justify-between gap-4">
-
-                <div className="flex items-center gap-3">
-
-                  <div
-                    className="
-                      w-11
-                      h-11
-                      rounded-xl
-                      bg-red-100
-                      text-red-600
-                      flex
-                      items-center
-                      justify-center
-                      shrink-0
-                    "
-                  >
-                    <AlertTriangle size={21} />
-                  </div>
-
-                  <div>
-
-                    <h2 className="text-lg font-bold text-stone-900">
-                      Eliminar venta
-                    </h2>
-
-                    <p className="text-sm text-stone-500 mt-0.5">
-                      Esta acción requiere confirmación.
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSaleToDelete(null)
-                  }
-                  className="
-                    w-9
-                    h-9
-                    rounded-lg
-                    flex
-                    items-center
-                    justify-center
-                    text-stone-500
-                    hover:bg-stone-100
-                  "
-                >
-                  <X size={19} />
-                </button>
-
-              </div>
-
-            </div>
-
-            {/* CONTENIDO */}
-
-            <div className="p-5 sm:p-6">
-
-              <p className="text-stone-600 leading-relaxed">
-
-                ¿Estás seguro de que quieres eliminar
-                esta venta?
-
-              </p>
-
-              {/* DATOS DE LA VENTA */}
-
-              <div
-                className="
-                  mt-4
-                  rounded-xl
-                  bg-stone-50
-                  border
-                  border-stone-200
-                  p-4
-                "
-              >
-
-                <div className="flex items-center justify-between gap-4">
-
-                  <div>
-
-                    <p className="text-xs text-stone-500">
-                      Factura
-                    </p>
-
-                    <p className="font-bold text-stone-900 mt-1">
-                      {saleToDelete.invoice}
-                    </p>
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-xs text-stone-500">
-                      Total
-                    </p>
-
-                    <p className="font-bold text-[#6F4E37] mt-1">
-                      {formatCurrency(
-                        saleToDelete.total
-                      )}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="border-t border-stone-200 my-4" />
-
-                <div>
-
-                  <p className="text-xs text-stone-500">
-                    Cliente
-                  </p>
-
-                  <p className="font-semibold text-stone-800 mt-1">
-                    {saleToDelete.customer}
-                  </p>
-
-                </div>
-
-              </div>
-
-              {/* ADVERTENCIA */}
-
-              <div
-                className="
-                  mt-4
-                  rounded-xl
-                  bg-red-50
-                  border
-                  border-red-200
-                  p-4
-                "
-              >
-
-                <p className="text-sm text-red-700 leading-relaxed">
-
-                  La venta será eliminada de la lista.
-                  Cuando conectemos la base de datos,
-                  esta acción también deberá controlar
-                  inventario, cartera y movimientos
-                  bancarios relacionados.
-
-                </p>
-
-              </div>
-
-            </div>
-
-            {/* BOTONES */}
-
+          onSubmit={handlePaySubmit}
+          size="md"
+          footer={
             <div
               className="
-                border-t
-                border-stone-200
-                p-5
-                sm:p-6
                 flex
                 flex-col-reverse
                 sm:flex-row
@@ -987,7 +670,7 @@ export default function SalesTable() {
               <button
                 type="button"
                 onClick={() =>
-                  setSaleToDelete(null)
+                  setPayingInvoice(null)
                 }
                 className="
                   w-full
@@ -1007,18 +690,17 @@ export default function SalesTable() {
               </button>
 
               <button
-                type="button"
-                onClick={
-                  handleConfirmDelete
-                }
+                type="submit"
+                disabled={paySaving}
                 className="
                   w-full
                   sm:w-auto
                   px-5
                   py-3
                   rounded-xl
-                  bg-red-600
-                  hover:bg-red-700
+                  bg-[#6F4E37]
+                  hover:bg-[#5B3F2D]
+                  disabled:opacity-60
                   text-white
                   font-semibold
                   transition
@@ -1028,15 +710,364 @@ export default function SalesTable() {
                   gap-2
                 "
               >
-                <Trash2 size={17} />
-                Eliminar venta
+                {paySaving && (
+                  <Loader2 size={17} className="animate-spin" />
+                )}
+                Registrar abono
               </button>
 
             </div>
+          }
+        >
 
-          </div>
+            {/* CONTENIDO */}
 
-        </div>
+            <div className="space-y-4">
+
+              {/* SALDO PENDIENTE */}
+
+              <div
+                className="
+                  rounded-xl
+                  bg-stone-50
+                  border
+                  border-stone-200
+                  p-4
+                  flex
+                  items-center
+                  justify-between
+                  gap-4
+                "
+              >
+
+                <div>
+
+                  <p className="text-xs text-stone-500">
+                    Cliente
+                  </p>
+
+                  <p className="font-semibold text-stone-800 mt-1">
+                    {payingInvoice.client.fullName}
+                  </p>
+
+                </div>
+
+                <div className="text-right">
+
+                  <p className="text-xs text-stone-500">
+                    Saldo pendiente
+                  </p>
+
+                  <p className="font-bold text-red-600 mt-1">
+                    {formatCurrency(payingInvoice.balance)}
+                  </p>
+
+                </div>
+
+              </div>
+
+              {/* ERROR */}
+
+              {payError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+                  {payError}
+                </div>
+              )}
+
+              {/* MONTO */}
+
+              <div>
+
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Monto a abonar *
+                </label>
+
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={payAmount}
+                  onChange={(event) =>
+                    setPayAmount(event.target.value)
+                  }
+                  placeholder="Ej. 50000"
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    px-4
+                    py-3
+                    outline-none
+                    focus:border-[#6F4E37]
+                    focus:ring-2
+                    focus:ring-[#6F4E37]/20
+                  "
+                />
+
+              </div>
+
+              {/* MÉTODO */}
+
+              <div>
+
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Método de pago *
+                </label>
+
+                <Select
+                  value={payMethod}
+                  onChange={(value) =>
+                    setPayMethod(
+                      value as PayMethod
+                    )
+                  }
+                  aria-label="Método de pago"
+                  options={[
+                    { value: "ABONO", label: "Abono", icon: HandCoins },
+                    { value: "EFECTIVO", label: "Efectivo", icon: Banknote },
+                    {
+                      value: "TRANSFERENCIA",
+                      label: "Transferencia",
+                      icon: Landmark,
+                    },
+                  ]}
+                />
+
+              </div>
+
+              {/* NOTAS */}
+
+              <div>
+
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Notas (opcional)
+                </label>
+
+                <textarea
+                  value={payNotes}
+                  onChange={(event) =>
+                    setPayNotes(event.target.value)
+                  }
+                  rows={2}
+                  placeholder="Ej. Abono en Bancolombia"
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    px-4
+                    py-3
+                    outline-none
+                    resize-none
+                    focus:border-[#6F4E37]
+                    focus:ring-2
+                    focus:ring-[#6F4E37]/20
+                  "
+                />
+
+              </div>
+
+            </div>
+
+        </Modal>
+
+      )}
+
+      {/* =========================================
+          MODAL ANULAR FACTURA
+      ========================================= */}
+
+      {voidingInvoice && (
+
+        <Modal
+          icon={AlertTriangle}
+          title="Anular factura"
+          subtitle="Esta acción requiere confirmación."
+          onClose={() =>
+            setVoidingInvoice(null)
+          }
+          onSubmit={handleVoidSubmit}
+          size="sm"
+          footer={
+            <div
+              className="
+                flex
+                flex-col-reverse
+                sm:flex-row
+                gap-3
+                sm:justify-end
+              "
+            >
+
+              <button
+                type="button"
+                onClick={() =>
+                  setVoidingInvoice(null)
+                }
+                className="
+                  w-full
+                  sm:w-auto
+                  px-5
+                  py-3
+                  rounded-xl
+                  border
+                  border-stone-300
+                  text-stone-700
+                  font-semibold
+                  hover:bg-stone-50
+                  transition
+                "
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={voidSaving}
+                className="
+                  w-full
+                  sm:w-auto
+                  px-5
+                  py-3
+                  rounded-xl
+                  bg-red-600
+                  hover:bg-red-700
+                  disabled:opacity-60
+                  text-white
+                  font-semibold
+                  transition
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                "
+              >
+                {voidSaving && (
+                  <Loader2 size={17} className="animate-spin" />
+                )}
+                Anular factura
+              </button>
+
+            </div>
+          }
+        >
+
+            {/* CONTENIDO */}
+
+            <div className="space-y-4">
+
+              <p className="text-stone-600 leading-relaxed">
+
+                ¿Estás seguro de que quieres anular
+                esta factura? El stock de los
+                productos será devuelto al inventario.
+
+              </p>
+
+              {/* DATOS DE LA FACTURA */}
+
+              <div
+                className="
+                  rounded-xl
+                  bg-stone-50
+                  border
+                  border-stone-200
+                  p-4
+                "
+              >
+
+                <div className="flex items-center justify-between gap-4">
+
+                  <div>
+
+                    <p className="text-xs text-stone-500">
+                      Factura
+                    </p>
+
+                    <p className="font-bold text-stone-900 mt-1">
+                      #{voidingInvoice.number}
+                    </p>
+
+                  </div>
+
+                  <div className="text-right">
+
+                    <p className="text-xs text-stone-500">
+                      Total
+                    </p>
+
+                    <p className="font-bold text-[#6F4E37] mt-1">
+                      {formatCurrency(voidingInvoice.total)}
+                    </p>
+
+                  </div>
+
+                </div>
+
+                <div className="border-t border-stone-200 my-4" />
+
+                <div>
+
+                  <p className="text-xs text-stone-500">
+                    Cliente
+                  </p>
+
+                  <p className="font-semibold text-stone-800 mt-1">
+                    {voidingInvoice.client.fullName}
+                  </p>
+
+                </div>
+
+              </div>
+
+              {/* ERROR */}
+
+              {voidError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+                  {voidError}
+                </div>
+              )}
+
+              {/* MOTIVO */}
+
+              <div>
+
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Motivo de anulación *
+                </label>
+
+                <textarea
+                  value={voidReason}
+                  onChange={(event) =>
+                    setVoidReason(event.target.value)
+                  }
+                  rows={3}
+                  placeholder="Ej. Cliente se arrepintió de la compra"
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    px-4
+                    py-3
+                    outline-none
+                    resize-none
+                    focus:border-[#6F4E37]
+                    focus:ring-2
+                    focus:ring-[#6F4E37]/20
+                  "
+                />
+
+                <p className="text-xs text-stone-400 mt-1">
+                  Mínimo 3 caracteres.
+                </p>
+
+              </div>
+
+            </div>
+
+        </Modal>
 
       )}
 
