@@ -10,7 +10,7 @@
 - **Cheo Manager** — ERP de café (facturación / inventario / producción) para Cheo's Café.
 - Repo: `https://github.com/SantiagoHerrera01/CheosManagment.git`
 - Monorepo: `backend/` (Express + Prisma + PostgreSQL) · `frontend/` (React + Vite + Tailwind) · turbo.
-- Un SOLO servicio en Render (back + front misma URL: `https://cheo-manager.onrender.com`), Swagger en `/api/docs`.
+- Un SOLO servicio en Render (back + front misma URL: `https://cheosmanagment.onrender.com`), Swagger en `/api/docs`.
 - Documentación en **español**.
 
 ## Documentos clave (fuente de verdad)

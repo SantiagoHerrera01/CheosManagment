@@ -6,7 +6,9 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  Settings,
   ShieldCheck,
+  UserCog,
 } from "lucide-react";
 
 import Sidebar from "../components/Sidebar";
@@ -40,7 +42,7 @@ const TODAY = new Intl.DateTimeFormat("es-CO", {
 }).format(new Date());
 
 export default function MainLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
@@ -283,6 +285,34 @@ export default function MainLayout() {
                 </div>
 
                 <div className="p-2">
+
+                  {hasRole() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate("/usuarios");
+                      }}
+                      role="menuitem"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-stone-700 hover:bg-stone-100 transition-colors"
+                    >
+                      <UserCog size={16} className="text-stone-400" />
+                      Usuarios
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      navigate("/configuracion");
+                    }}
+                    role="menuitem"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-stone-700 hover:bg-stone-100 transition-colors"
+                  >
+                    <Settings size={16} className="text-stone-400" />
+                    Configuración
+                  </button>
 
                   <button
                     type="button"

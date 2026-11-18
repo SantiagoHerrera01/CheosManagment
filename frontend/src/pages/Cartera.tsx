@@ -221,6 +221,12 @@ export default function Cartera() {
         <button
           type="button"
           onClick={() => openPayModal()}
+          disabled={accounts.length === 0}
+          title={
+            accounts.length === 0
+              ? "No hay cuentas por cobrar todavía"
+              : undefined
+          }
           className="
             flex
             items-center
@@ -233,6 +239,9 @@ export default function Cartera() {
             rounded-xl
             font-semibold
             transition
+            disabled:opacity-45
+            disabled:cursor-not-allowed
+            disabled:pointer-events-none
           "
         >
           <Plus size={20} />
