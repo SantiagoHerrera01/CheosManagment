@@ -18,9 +18,15 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, qs } from "../lib/api";
+import {
+  SIZE_OPTIONS,
+  STANDARD_PRESENTATIONS,
+  isKnownSize,
+} from "../lib/catalog";
 import { useAuth } from "../context/auth-context";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import type {
   Grind,
   Paginated,
@@ -59,6 +65,7 @@ interface PresentationDraft {
   label: string;
   grind: Grind;
   price: string;
+  wholesalePrice: string;
   cost: string;
   stock: string;
   minimumStock: string;
@@ -68,6 +75,7 @@ const emptyPresentation: PresentationDraft = {
   label: "",
   grind: "MOLIDO",
   price: "",
+  wholesalePrice: "",
   cost: "0",
   stock: "0",
   minimumStock: "0",
@@ -107,6 +115,7 @@ export default function Products() {
   } | null>(null);
   const [presForm, setPresForm] = useState({
     price: "",
+    wholesalePrice: "",
     cost: "",
     minimumStock: "",
   });
@@ -121,6 +130,20 @@ export default function Products() {
     reason: "PRODUCCION",
     notes: "",
   });
+
+  // Modal plantilla de presentaciones estándar (ADMIN) — P1-4
+  const [templateTarget, setTemplateTarget] =
+    useState<Product | null>(null);
+
+  const [templateRows, setTemplateRows] = useState<
+    {
+      label: string;
+      grind: Grind;
+      price: string;
+      cost: string;
+      enabled: boolean;
+    }[]
+  >([]);
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -210,6 +233,9 @@ export default function Products() {
           label: p.label.trim(),
           grind: p.grind,
           price: Number(p.price),
+          wholesalePrice: p.wholesalePrice.trim()
+            ? Number(p.wholesalePrice)
+            : null,
           cost: Number(p.cost) || 0,
           stock: Number(p.stock) || 0,
           minimumStock: Number(p.minimumStock) || 0,
@@ -235,6 +261,7 @@ export default function Products() {
     setEditPres({ product, presentation });
     setPresForm({
       price: String(presentation.price),
+      wholesalePrice: String(presentation.wholesalePrice ?? ""),
       cost: String(presentation.cost ?? 0),
       minimumStock: String(presentation.minimumStock),
     });
@@ -252,6 +279,9 @@ export default function Products() {
         `/products/${editPres.product.id}/presentations/${editPres.presentation.id}`,
         {
           price: Number(presForm.price),
+          wholesalePrice: presForm.wholesalePrice.trim()
+            ? Number(presForm.wholesalePrice)
+            : null,
           ...(hasRole() ? { cost: Number(presForm.cost) } : {}),
           minimumStock: Number(presForm.minimumStock),
         }
@@ -291,6 +321,109 @@ export default function Products() {
     } catch (error) {
       setFormError(
         error instanceof ApiError ? error.message : "No fue posible registrar el stock."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---------------------------------------------------------
+  //  Plantilla de presentaciones estándar (P1-4)
+  // ---------------------------------------------------------
+  /** Combinaciones tamaño × molienda que le faltan al producto. */
+  const missingOf = (product: Product) =>
+    STANDARD_PRESENTATIONS.filter(
+      (std) =>
+        !product.presentations.some(
+          (p) => p.label === std.label && p.grind === std.grind
+        )
+    );
+
+  const openTemplate = (product: Product) => {
+    setTemplateRows(
+      missingOf(product).map((m) => {
+        // Sugerencia: copia precio/costo del mismo tamaño si existe
+        // (así 250 g molido arranca con el precio de 250 g grano).
+        const ref = product.presentations.find(
+          (p) => p.label === m.label
+        );
+
+        return {
+          label: m.label,
+          grind: m.grind,
+          price: ref ? String(ref.price) : "",
+          cost:
+            ref && ref.cost !== undefined
+              ? String(ref.cost)
+              : "0",
+          enabled: true,
+        };
+      })
+    );
+    setTemplateTarget(product);
+    setFormError(null);
+  };
+
+  const handleTemplateSave = async () => {
+    if (!templateTarget) {
+      return;
+    }
+
+    setFormError(null);
+
+    const selected = templateRows.filter((r) => r.enabled);
+
+    if (selected.length === 0) {
+      setFormError(
+        "Selecciona al menos una presentación para agregar."
+      );
+      return;
+    }
+
+    for (const r of selected) {
+      if (!(Number(r.price) > 0)) {
+        setFormError(
+          `La presentación "${r.label} · ${GRIND_LABELS[r.grind]}" necesita un precio mayor que cero.`
+        );
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      for (const r of selected) {
+        try {
+          await api.post(
+            `/products/${templateTarget.id}/presentations`,
+            {
+              label: r.label,
+              grind: r.grind,
+              price: Number(r.price),
+              cost: Number(r.cost) || 0,
+              stock: 0,
+              minimumStock: 0,
+            }
+          );
+        } catch (error) {
+          // 409 = ya existía (otra pestaña): no rompe el resto
+          if (
+            !(
+              error instanceof ApiError &&
+              error.status === 409
+            )
+          ) {
+            throw error;
+          }
+        }
+      }
+
+      setTemplateTarget(null);
+      await loadProducts();
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible agregar las presentaciones."
       );
     } finally {
       setSaving(false);
@@ -482,6 +615,12 @@ export default function Products() {
                           {formatCurrency(pres.price)}
                         </span>
 
+                        {pres.wholesalePrice != null && (
+                          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            mayoreo {formatCurrency(pres.wholesalePrice)}
+                          </span>
+                        )}
+
                         {pres.cost !== undefined && (
                           <span className="text-xs text-stone-400">
                             costo {formatCurrency(pres.cost)}
@@ -532,6 +671,27 @@ export default function Products() {
                   })}
 
                 </div>
+
+                {/* AGREGAR PRESENTACIONES (plantilla estándar) */}
+                {canManage && missingOf(product).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openTemplate(product)}
+                    className="
+                      mt-3
+                      inline-flex
+                      items-center
+                      gap-1.5
+                      text-sm
+                      font-medium
+                      text-[#6F4E37]
+                      hover:underline
+                    "
+                  >
+                    <Plus size={14} />
+                    Agregar presentaciones ({missingOf(product).length})
+                  </button>
+                )}
 
               </div>
             ))}
@@ -675,11 +835,25 @@ export default function Products() {
 
                       <div className="col-span-2">
                         <label className="block text-xs text-stone-500 mb-1">Etiqueta *</label>
+                        <Select
+                          value={isKnownSize(pres.label) ? pres.label : ""}
+                          onChange={(value) =>
+                            updatePresentationField(index, "label", value)
+                          }
+                          className="text-sm py-2"
+                          aria-label="Tamaño"
+                          placeholder="Tamaño…"
+                          options={SIZE_OPTIONS.map((size) => ({
+                            value: size,
+                            label: size,
+                            icon: Package,
+                          }))}
+                        />
                         <input
                           value={pres.label}
                           onChange={(e) => updatePresentationField(index, "label", e.target.value)}
-                          placeholder="Ej. 500 g"
-                          className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
+                          placeholder="O escribe otro (Ej. 750 g)"
+                          className="mt-2 w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
                         />
                       </div>
 
@@ -701,23 +875,29 @@ export default function Products() {
 
                       <div>
                         <label className="block text-xs text-stone-500 mb-1">Precio *</label>
-                        <input
-                          type="number"
-                          min="1"
+                        <MoneyInput
                           value={pres.price}
-                          onChange={(e) => updatePresentationField(index, "price", e.target.value)}
-                          placeholder="12900"
+                          onChange={(raw) => updatePresentationField(index, "price", raw)}
+                          placeholder="12.900"
+                          className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
+                        />
+                      </div>
+
+                      <div className="col-span-2">
+                        <label className="block text-xs text-stone-500 mb-1">Precio mayoreo (opcional)</label>
+                        <MoneyInput
+                          value={pres.wholesalePrice}
+                          onChange={(raw) => updatePresentationField(index, "wholesalePrice", raw)}
+                          placeholder="Ej. 11.500"
                           className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
                         />
                       </div>
 
                       <div>
                         <label className="block text-xs text-stone-500 mb-1">Costo</label>
-                        <input
-                          type="number"
-                          min="0"
+                        <MoneyInput
                           value={pres.cost}
-                          onChange={(e) => updatePresentationField(index, "cost", e.target.value)}
+                          onChange={(raw) => updatePresentationField(index, "cost", raw)}
                           className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
                         />
                       </div>
@@ -766,6 +946,132 @@ export default function Products() {
         </Modal>
       )}
 
+      {/* MODAL AGREGAR PRESENTACIONES (plantilla estándar) */}
+      {templateTarget && (
+        <Modal
+          icon={Plus}
+          title="Agregar presentaciones"
+          subtitle={`${templateTarget.name} · combinaciones que faltan`}
+          onClose={() => setTemplateTarget(null)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setTemplateTarget(null)}
+                disabled={saving}
+                className="px-5 py-3 rounded-xl border border-stone-300 text-stone-700 font-medium hover:bg-stone-50 transition disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleTemplateSave()}
+                disabled={saving}
+                className="px-5 py-3 rounded-xl bg-[#6F4E37] hover:bg-[#5B3F2D] disabled:opacity-60 text-white font-semibold transition inline-flex items-center gap-2"
+              >
+                {saving && <Loader2 size={17} className="animate-spin" />}
+                Agregar (
+                {templateRows.filter((r) => r.enabled).length})
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+
+            {formError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {formError}
+              </div>
+            )}
+
+            <p className="text-sm text-stone-500">
+              Estas combinaciones de tamaño y molienda le faltan al producto.
+              Desmarca las que no quieras y ajusta el precio (el stock entra
+              después por compra o producción).
+            </p>
+
+            <div className="space-y-3">
+
+              {templateRows.map((row, index) => (
+                <div
+                  key={`${row.label}-${row.grind}`}
+                  className="rounded-xl border border-stone-200 bg-stone-50/60 px-4 py-3 space-y-2.5"
+                >
+
+                  <label className="flex items-center gap-2.5 text-sm font-medium text-stone-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={row.enabled}
+                      onChange={(event) =>
+                        setTemplateRows((prev) =>
+                          prev.map((r, i) =>
+                            i === index
+                              ? { ...r, enabled: event.target.checked }
+                              : r
+                          )
+                        )
+                      }
+                      className="w-4 h-4 accent-[#6F4E37]"
+                    />
+                    {row.label} · {GRIND_LABELS[row.grind]}
+                  </label>
+
+                  {row.enabled && (
+                    <div className="flex gap-3 pl-7">
+
+                      <div className="flex-1">
+                        <label className="block text-xs text-stone-500 mb-1">
+                          Precio de venta *
+                        </label>
+                        <MoneyInput
+                          value={row.price}
+                          onChange={(raw) =>
+                            setTemplateRows((prev) =>
+                              prev.map((r, i) =>
+                                i === index
+                                  ? { ...r, price: raw }
+                                  : r
+                              )
+                            )
+                          }
+                          placeholder="12.900"
+                          className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
+                        />
+                      </div>
+
+                      <div className="flex-1">
+                        <label className="block text-xs text-stone-500 mb-1">
+                          Costo interno
+                        </label>
+                        <MoneyInput
+                          value={row.cost}
+                          onChange={(raw) =>
+                            setTemplateRows((prev) =>
+                              prev.map((r, i) =>
+                                i === index
+                                  ? { ...r, cost: raw }
+                                  : r
+                              )
+                            )
+                          }
+                          placeholder="0"
+                          className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#6F4E37]"
+                        />
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+              ))}
+
+            </div>
+
+          </div>
+        </Modal>
+      )}
+
       {/* MODAL EDITAR PRESENTACIÓN */}
       {editPres && (
         <Modal
@@ -807,13 +1113,26 @@ export default function Products() {
                 <label className="block text-sm font-medium text-stone-700 mb-2">
                   Precio de venta *
                 </label>
-                <input
-                  type="number"
-                  min="1"
+                <MoneyInput
                   value={presForm.price}
-                  onChange={(event) => setPresForm({ ...presForm, price: event.target.value })}
+                  onChange={(raw) => setPresForm({ ...presForm, price: raw })}
                   className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Precio mayoreo (opcional)
+                </label>
+                <MoneyInput
+                  value={presForm.wholesalePrice}
+                  onChange={(raw) => setPresForm({ ...presForm, wholesalePrice: raw })}
+                  placeholder="Déjalo vacío si no vendes al por mayor"
+                  className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
+                />
+                <p className="text-xs text-stone-400 mt-1.5">
+                  El vendedor podrá alternarlo en el carrito de la venta. Déjalo vacío para quitarlo.
+                </p>
               </div>
 
               {canManage && (
@@ -821,11 +1140,9 @@ export default function Products() {
                   <label className="block text-sm font-medium text-stone-700 mb-2">
                     Costo interno
                   </label>
-                  <input
-                    type="number"
-                    min="0"
+                  <MoneyInput
                     value={presForm.cost}
-                    onChange={(event) => setPresForm({ ...presForm, cost: event.target.value })}
+                    onChange={(raw) => setPresForm({ ...presForm, cost: raw })}
                     className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
                   />
                   <p className="text-xs text-stone-400 mt-1">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -130,6 +130,61 @@ export default function DateRangePicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Recalcula la posición del menú anclada al botón. El portal usa
+   * `position: fixed` (coords de viewport), así que hay que repintarlo en
+   * cada scroll/resize: si no, el calendario queda flotando suelto sobre la
+   * página cuando la tabla se desplaza.
+   */
+  const updatePos = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    // El trigger salió de la pantalla: mejor cerrar que dejarlo flotando.
+    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      setOpen(false);
+      return;
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const above = spaceBelow < 380 && rect.top > spaceBelow;
+
+    setPos((current) => {
+      const next = {
+        top: above ? rect.top - 8 : rect.bottom + 8,
+        left: Math.min(rect.left, window.innerWidth - rect.width - 12),
+        width: rect.width,
+        above,
+      };
+      // Evita re-render si no cambió nada (scroll del propio menú, etc.).
+      return current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.above === next.above
+        ? current
+        : next;
+    });
+  }, []);
+
+  // Posición inicial al abrir (useLayoutEffect = sin parpadeo) + seguimiento
+  // del botón mientras esté abierto.
+  useLayoutEffect(() => {
+    if (open) updatePos();
+  }, [open, updatePos]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    // `capture: true` para que also el scroll de contenedores internos
+    // (la tabla, el sidebar) reposicione el menú.
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [open, updatePos]);
+
   // Cierre con clic fuera y Escape.
   useEffect(() => {
     if (!open) return;
@@ -158,20 +213,9 @@ export default function DateRangePicker({
   }, [open]);
 
   function toggle() {
-    const rect = triggerRef.current?.getBoundingClientRect();
-
-    if (!open && rect) {
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const above = spaceBelow < 380 && rect.top > spaceBelow;
-
-      setPos({
-        top: above ? rect.top - 8 : rect.bottom + 8,
-        left: Math.min(rect.left, window.innerWidth - rect.width - 12),
-        width: rect.width,
-        above,
-      });
-
+    if (!open) {
       // El calendario abre en el mes del inicio del rango (o el actual).
+      // La posición la calcula updatePos() en el useLayoutEffect de apertura.
       setMonth(value.from ? fromISO(value.from) : new Date());
       setPendingFrom(null);
       setHovered(null);

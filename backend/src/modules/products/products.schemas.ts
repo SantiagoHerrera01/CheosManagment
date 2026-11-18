@@ -11,6 +11,7 @@ export const presentationInputSchema = z.object({
   label: z.string().trim().min(1).max(30),
   grind: grindSchema,
   price: z.number().positive("El precio debe ser mayor que cero."),
+  wholesalePrice: z.number().positive().nullish(),
   cost: z.number().nonnegative().default(0),
   stock: z.number().int().nonnegative().default(0),
   minimumStock: z.number().int().nonnegative().default(0),
@@ -44,6 +45,8 @@ export const updatePresentationSchema = z
     label: z.string().trim().min(1).max(30).optional(),
     grind: grindSchema.optional(),
     price: z.number().positive().optional(),
+    /** Precio de mayoreo: se envía null para quitarlo. */
+    wholesalePrice: z.number().positive().nullish(),
     cost: z.number().nonnegative().optional(),
     minimumStock: z.number().int().nonnegative().optional(),
     isActive: z.boolean().optional(),

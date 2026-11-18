@@ -15,6 +15,7 @@ import {
 import { useAuth } from "../context/auth-context";
 import { api, ApiError, qs } from "../lib/api";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import Select from "../components/ui/Select";
 import type { Paginated, Product, Purchase } from "../types/api";
 
@@ -484,15 +485,12 @@ export default function Purchases() {
                         </label>
                       )}
 
-                      <input
-                        type="number"
+                      <MoneyInput
                         required
-                        min="0"
-                        step="any"
-                        placeholder="18000"
+                        placeholder="18.000"
                         value={item.unitCost}
-                        onChange={(event) =>
-                          updateItem(index, { unitCost: event.target.value })
+                        onChange={(raw) =>
+                          updateItem(index, { unitCost: raw })
                         }
                         className={`${inputClass} py-2.5 text-sm`}
                       />

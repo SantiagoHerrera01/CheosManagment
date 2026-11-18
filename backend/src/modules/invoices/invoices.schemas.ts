@@ -20,6 +20,11 @@ export const invoiceStatusSchema = z.enum([
 export const invoiceItemInputSchema = z.object({
   presentationId: z.string().uuid("presentationId debe ser un UUID."),
   quantity: z.number().int().positive("La cantidad debe ser mayor que cero."),
+  /**
+   * Aplica el precio de mayoreo de la presentación (P1-3). El precio real
+   * siempre lo resuelve la BD: el cliente solo envía la bandera.
+   */
+  wholesale: z.boolean().default(false),
 });
 
 export const createInvoiceSchema = z.object({

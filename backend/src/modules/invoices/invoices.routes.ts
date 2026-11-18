@@ -5,7 +5,10 @@ import { Role } from "@prisma/client";
 
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 import { validate } from "../../shared/middleware/validate.js";
+import { ApiError } from "../../shared/errors/api-error.js";
+import { verifyToken } from "../../shared/utils/share-token.js";
 import * as invoicesService from "./invoices.service.js";
+import { sendInvoicePdf } from "./invoices.pdf.js";
 import {
   createInvoiceSchema,
   createPaymentSchema,
@@ -15,9 +18,55 @@ import {
 
 const router = Router();
 
-router.use(authenticate);
-
 const idParam = z.object({ id: z.string().uuid() });
+
+/**
+ * @openapi
+ * /invoices/public/{id}/pdf:
+ *   get:
+ *     tags: [Facturas]
+ *     summary: PDF de factura por link firmado (sin sesión)
+ *     description: >
+ *       Genera el PDF al momento desde la base de datos y lo devuelve en
+ *       línea. Solo se acepta con la firma `token` (HMAC de 64 caracteres
+ *       que viaja en la factura): es el link que se comparte por WhatsApp
+ *       o correo. El saldo que se ve es siempre el vigente.
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *       - { in: query, name: token, required: true, schema: { type: string, minLength: 64, maxLength: 64 } }
+ *       - { in: query, name: download, schema: { type: string, enum: ["1"] }, description: "1 = fuerza la descarga del archivo (link de WhatsApp)" }
+ *     responses:
+ *       "200": { description: PDF de la factura }
+ *       "403": { description: Firma inválida o manipulada }
+ */
+router.get(
+  "/public/:id/pdf",
+  validate({
+    params: idParam,
+    query: z.object({
+      token: z.string().length(64),
+      /** `1` = responder como descarga (`attachment`) en vez de inline. */
+      download: z.literal("1").optional(),
+    }),
+  }),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params as { id: string };
+      const { token, download } = req.query as { token: string; download?: "1" };
+
+      if (!verifyToken(id, token)) {
+        throw ApiError.forbidden("Enlace de factura inválido.");
+      }
+
+      const invoice = await invoicesService.getById(id);
+      await sendInvoicePdf(res, invoice, { download: download === "1" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.use(authenticate);
 
 /**
  * @openapi
@@ -126,6 +175,36 @@ router.get(
 
 /**
  * @openapi
+ * /invoices/{id}/pdf:
+ *   get:
+ *     tags: [Facturas]
+ *     summary: PDF de factura (sesión iniciada)
+ *     description: >
+ *       Mismo PDF que el link público, pero usando la sesión de la app
+ *       (botón "Ver factura" desde el detalle de la venta).
+ *     security: [{ cookieAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       "200": { description: PDF de la factura }
+ *       "404": { $ref: "#/components/responses/NotFound" }
+ */
+router.get(
+  "/:id/pdf",
+  requireRole(Role.ADMIN, Role.VENDEDOR, Role.CONTADOR),
+  validate({ params: idParam }),
+  async (req, res, next) => {
+    try {
+      const invoice = await invoicesService.getById((req.params.id as string));
+      await sendInvoicePdf(res, invoice);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * @openapi
  * /invoices:
  *   post:
  *     tags: [Facturas]
@@ -153,6 +232,7 @@ router.get(
  *                   properties:
  *                     presentationId: { type: string, format: uuid }
  *                     quantity: { type: integer, example: 2 }
+ *                     wholesale: { type: boolean, default: false, description: Cobra el precio de mayoreo de la presentación si existe }
  *               discount: { type: number, description: Descuento en pesos }
  *               paymentMethod: { $ref: "#/components/schemas/MetodoPago" }
  *               initialPayment: { type: number, description: Abono inicial (método ABONO) }

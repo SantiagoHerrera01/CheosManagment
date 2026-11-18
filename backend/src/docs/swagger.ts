@@ -109,6 +109,11 @@ const options: swaggerJsdoc.Options = {
             label: { type: "string", example: "250 g" },
             grind: { type: "string", enum: ["MOLIDO", "GRANO"] },
             price: { type: "number", example: 12900, description: "Precio de venta" },
+            wholesalePrice: {
+              type: "number",
+              example: 11500,
+              description: "Precio de mayoreo opcional (enviar null para quitarlo)",
+            },
             cost: { type: "number", example: 8000, description: "Costo interno (solo roles ADMIN/CONTADOR lo ven)" },
             stock: { type: "integer", example: 100 },
             minimumStock: { type: "integer", example: 20, description: "Umbral de alerta (R8)" },

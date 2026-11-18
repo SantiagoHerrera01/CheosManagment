@@ -4,14 +4,27 @@ import {
   CreditCard,
   Landmark,
   Loader2,
+  MessageCircle,
+  Plus,
+  Search,
   ShoppingCart,
   UserRound,
   Wallet,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import SaleProducts, { type CartItem } from "./SaleProducts";
+import ClientFormModal from "../clients/ClientFormModal";
 import { api, ApiError, qs } from "../../lib/api";
+import { saleMessage, whatsappLink } from "../../lib/whatsapp";
+import MoneyInput from "../ui/MoneyInput";
 import Select from "../ui/Select";
 import type {
   Client,
@@ -55,12 +68,26 @@ const bankAccounts = [
   },
 ];
 
+/** Atajos de porcentaje de descuento en el resumen de la venta. */
+const DISCOUNT_SHORTCUTS = [5, 15, 30];
+
 function formatCurrency(value: number) {
   return value.toLocaleString("es-CO", {
     style: "currency",
     currency: "COP",
     maximumFractionDigits: 0,
   });
+}
+
+/**
+ * Normaliza texto para buscar: sin tildes ni mayúsculas.
+ * "Santiago Castañeda" se encuentra escribiendo "santiago" o "castaneda".
+ */
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 /** Mensaje legible para el banner de error (prioriza issues de zod). */
@@ -96,6 +123,14 @@ export default function NewSale({
 
   const [search, setSearch] = useState("");
 
+  /** Autocomplete: lista visible, fila resaltada con teclado y modal de alta. */
+  const [openList, setOpenList] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [showClientModal, setShowClientModal] = useState(false);
+
+  /** Contenedor del buscador: sirve para detectar el clic fuera de la lista. */
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+
   const [selectedCustomer, setSelectedCustomer] =
     useState<Client | null>(null);
 
@@ -107,6 +142,16 @@ export default function NewSale({
   const [selectedBank, setSelectedBank] = useState("");
 
   const [discount, setDiscount] = useState("");
+
+  /**
+   * Atajo de porcentaje activo (5 / 15 / 30). Mientras esté activo el
+   * descuento se deriva del subtotal y se recalcula solo; al editar el
+   * campo a mano vuelve a ser un descuento manual en pesos.
+   */
+  const [discountPct, setDiscountPct] = useState<number | null>(null);
+
+  /** Input del descuento (el botón "Manual" lo enfoca). */
+  const discountInputRef = useRef<HTMLInputElement>(null);
 
   const [receivedAmount, setReceivedAmount] = useState("");
 
@@ -159,18 +204,108 @@ export default function NewSale({
     void loadClients();
   }, [loadClients]);
 
-  const filteredCustomers = clients.filter((customer) => {
-    const value = search.toLowerCase().trim();
+  /**
+   * Coincidencias del autocomplete. Con el campo vacío muestra los primeros
+   * clientes (para que en móvil solo con tocar ya se despliegue la lista).
+   * Sin tildes: "castaneda" encuentra "Castañeda".
+   */
+  const filteredCustomers = useMemo(() => {
+    const value = normalize(search.trim());
 
-    if (!value) {
-      return false;
+    const matches = clients.filter((customer) => {
+      if (!value) return true;
+
+      return (
+        normalize(customer.fullName).includes(value) ||
+        customer.documentNumber.includes(value) ||
+        (customer.phone ?? "").includes(value)
+      );
+    });
+
+    return value ? matches : matches.slice(0, 30);
+  }, [clients, search]);
+
+  /** Elige un cliente del autocomplete y cierra la lista. */
+  const selectCustomer = (customer: Client) => {
+    setSelectedCustomer(customer);
+    setSearch("");
+    setOpenList(false);
+    setActiveIndex(-1);
+  };
+
+  /** Abre el modal de alta de cliente desde el buscador de la venta. */
+  const openNewClientModal = () => {
+    setOpenList(false);
+    setActiveIndex(-1);
+    setShowClientModal(true);
+  };
+
+  /**
+   * Tras crear el cliente en el modal embebido: entra a la lista local,
+   * queda seleccionado en la venta y se cierra el modal de alta.
+   */
+  const handleClientSaved = (client: Client) => {
+    setClients((previous) =>
+      previous.some((current) => current.id === client.id)
+        ? previous
+        : [...previous, client]
+    );
+    setSelectedCustomer(client);
+    setSearch("");
+    setShowClientModal(false);
+    setActiveIndex(-1);
+  };
+
+  /** Navegación con teclado del autocomplete (↑ ↓ Enter Escape). */
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpenList(true);
+      setActiveIndex((current) =>
+        Math.min(current + 1, filteredCustomers.length - 1)
+      );
+      return;
     }
 
-    return (
-      customer.fullName.toLowerCase().includes(value) ||
-      customer.documentNumber.includes(value)
-    );
-  });
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      const customer = filteredCustomers[activeIndex];
+      if (openList && customer) {
+        event.preventDefault();
+        selectCustomer(customer);
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (openList) {
+        event.stopPropagation();
+        setOpenList(false);
+        setActiveIndex(-1);
+      }
+    }
+  };
+
+  // Clic fuera del buscador → se pliega la lista de sugerencias.
+  useEffect(() => {
+    if (!openList) return;
+
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (!searchWrapRef.current?.contains(target)) {
+        setOpenList(false);
+        setActiveIndex(-1);
+      }
+    }
+
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [openList]);
 
   const subtotal = useMemo(() => {
     return items.reduce(
@@ -180,8 +315,15 @@ export default function NewSale({
     );
   }, [items]);
 
+  /**
+   * Descuento efectivo en pesos: si hay un atajo de porcentaje activo se
+   * calcula sobre el subtotal (y se recalcula si cambia el carrito);
+   * si no, se usa el valor escrito a mano. Siempre limitado al subtotal.
+   */
   const discountValue = Math.min(
-    Number(discount) || 0,
+    discountPct !== null
+      ? Math.round((subtotal * discountPct) / 100)
+      : Number(discount) || 0,
     subtotal
   );
 
@@ -189,6 +331,22 @@ export default function NewSale({
     subtotal - discountValue,
     0
   );
+
+  /**
+   * Atajo de porcentaje: activa el modo porcentaje (el valor se deriva
+   * del subtotal). Tocar el que ya está activo lo desactiva y deja el
+   * resultado en pesos como descuento manual.
+   */
+  const applyDiscountPct = (pct: number) => {
+    if (discountPct === pct) {
+      setDiscountPct(null);
+      setDiscount(String(discountValue));
+      return;
+    }
+
+    setDiscountPct(pct);
+    setDiscount(String(Math.round((subtotal * pct) / 100)));
+  };
 
   const received = Number(receivedAmount) || 0;
 
@@ -215,6 +373,7 @@ export default function NewSale({
   const handleNewSale = () => {
     setItems([]);
     setDiscount("");
+    setDiscountPct(null);
     setReceivedAmount("");
     setSavingError(null);
     setCreatedInvoice(null);
@@ -249,8 +408,9 @@ export default function NewSale({
       items: items.map((item) => ({
         presentationId: item.presentationId,
         quantity: item.quantity,
+        wholesale: item.wholesale,
       })),
-      discount: Number(discount || 0),
+      discount: discountValue,
       paymentMethod,
       initialPayment:
         paymentMethod === "ABONO"
@@ -392,6 +552,56 @@ export default function NewSale({
             "
           >
 
+            {createdInvoice.client.phone ? (
+              <a
+                href={whatsappLink(
+                  createdInvoice.client.phone,
+                  saleMessage(createdInvoice)
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="
+                  w-full
+                  sm:w-auto
+                  min-w-[220px]
+                  bg-emerald-600
+                  hover:bg-emerald-700
+                  text-white
+                  px-7
+                  py-4
+                  rounded-xl
+                  font-semibold
+                  transition
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                "
+              >
+                <MessageCircle size={19} />
+                Enviar por WhatsApp
+              </a>
+            ) : (
+              <span
+                className="
+                  w-full
+                  sm:w-auto
+                  min-w-[220px]
+                  px-7
+                  py-4
+                  rounded-xl
+                  border
+                  border-dashed
+                  border-stone-300
+                  text-stone-400
+                  text-sm
+                  text-center
+                "
+              >
+                Cliente sin celular registrado
+              </span>
+            )}
+
             <button
               type="button"
               onClick={handleNewSale}
@@ -452,32 +662,63 @@ export default function NewSale({
 
         <div className="p-5 sm:p-6 border-b border-stone-200">
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3">
 
-            <div
+            <div className="flex items-center gap-3 min-w-0">
+
+              <div
+                className="
+                  w-10
+                  h-10
+                  rounded-xl
+                  bg-[#F3EDE7]
+                  text-[#6F4E37]
+                  flex
+                  items-center
+                  justify-center
+                  shrink-0
+                "
+              >
+                <UserRound size={19} />
+              </div>
+
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-stone-900">
+                  Cliente
+                </h2>
+
+                <p className="text-sm text-stone-500 truncate">
+                  Selecciona el cliente de esta venta.
+                </p>
+              </div>
+
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowClientModal(true)}
               className="
-                w-10
-                h-10
-                rounded-xl
-                bg-[#F3EDE7]
-                text-[#6F4E37]
-                flex
+                inline-flex
                 items-center
-                justify-center
+                gap-1.5
+                shrink-0
+                px-3
+                py-2
+                rounded-lg
+                border
+                border-stone-300
+                text-sm
+                font-medium
+                text-stone-700
+                hover:border-[#6F4E37]/50
+                hover:text-[#6F4E37]
+                hover:bg-[#6F4E37]/5
+                transition
               "
             >
-              <UserRound size={19} />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold text-stone-900">
-                Cliente
-              </h2>
-
-              <p className="text-sm text-stone-500">
-                Selecciona el cliente de esta venta.
-              </p>
-            </div>
+              <Plus size={16} />
+              Nuevo cliente
+            </button>
 
           </div>
 
@@ -497,9 +738,9 @@ export default function NewSale({
               "
             >
 
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
 
                   <div
                     className="
@@ -517,13 +758,14 @@ export default function NewSale({
                     <UserRound size={18} />
                   </div>
 
-                  <div>
-                    <p className="font-semibold text-stone-900">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-stone-900 truncate">
                       {selectedCustomer.fullName}
                     </p>
 
-                    <p className="text-sm text-stone-500">
+                    <p className="text-sm text-stone-500 truncate">
                       Documento: {selectedCustomer.documentNumber}
+                      {selectedCustomer.phone && ` · ${selectedCustomer.phone}`}
                     </p>
                   </div>
 
@@ -534,12 +776,14 @@ export default function NewSale({
                   onClick={() => {
                     setSelectedCustomer(null);
                     setSearch("");
+                    setActiveIndex(-1);
                   }}
                   className="
                     text-sm
                     font-semibold
                     text-[#6F4E37]
                     hover:underline
+                    shrink-0
                   "
                 >
                   Cambiar
@@ -609,104 +853,195 @@ export default function NewSale({
 
           ) : (
 
-            <div className="space-y-3">
+            <div className="space-y-3" ref={searchWrapRef}>
 
-              <input
-                type="text"
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Buscar por nombre o documento..."
-                className="
-                  w-full
-                  border
-                  border-stone-300
-                  rounded-xl
-                  px-4
-                  py-3.5
-                  outline-none
-                  focus:border-[#6F4E37]
-                  focus:ring-2
-                  focus:ring-[#6F4E37]/20
-                "
-              />
+              {/* BUSCADOR (autocomplete) */}
 
-              {search.trim() !== "" && (
+              <div className="relative">
+
+                <Search
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"
+                />
+
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    setOpenList(true);
+                    setActiveIndex(-1);
+                  }}
+                  onFocus={() => setOpenList(true)}
+                  onKeyDown={handleSearchKeyDown}
+                  role="combobox"
+                  aria-expanded={openList}
+                  aria-controls="sale-client-list"
+                  aria-autocomplete="list"
+                  autoComplete="off"
+                  placeholder="Buscar por nombre, documento o teléfono..."
+                  className="
+                    w-full
+                    border
+                    border-stone-300
+                    rounded-xl
+                    pl-11
+                    pr-4
+                    py-3.5
+                    outline-none
+                    focus:border-[#6F4E37]
+                    focus:ring-2
+                    focus:ring-[#6F4E37]/20
+                  "
+                />
+
+              </div>
+
+              {/* LISTA DE SUGERENCIAS */}
+
+              {openList && (
 
                 <div
+                  id="sale-client-list"
+                  role="listbox"
+                  aria-label="Clientes registrados"
                   className="
                     border
                     border-stone-200
                     rounded-xl
+                    bg-white
                     overflow-hidden
+                    shadow-sm
                   "
                 >
 
                   {filteredCustomers.length > 0 ? (
 
-                    filteredCustomers.map((customer) => (
+                    <div className="max-h-72 overflow-y-auto">
 
-                      <button
-                        key={customer.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedCustomer(customer);
-                          setSearch("");
-                        }}
-                        className="
-                          w-full
-                          flex
-                          items-center
-                          gap-3
-                          text-left
-                          px-4
-                          py-4
-                          border-b
-                          last:border-b-0
-                          border-stone-100
-                          hover:bg-stone-50
-                          transition
-                        "
-                      >
+                      {filteredCustomers.map((customer, index) => (
 
-                        <div
-                          className="
-                            w-10
-                            h-10
-                            rounded-full
-                            bg-stone-100
-                            text-stone-600
+                        <button
+                          key={customer.id}
+                          type="button"
+                          role="option"
+                          aria-selected={index === activeIndex}
+                          onClick={() => selectCustomer(customer)}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          className={`
+                            w-full
                             flex
                             items-center
-                            justify-center
-                            shrink-0
-                          "
+                            gap-3
+                            text-left
+                            px-4
+                            py-3.5
+                            border-b
+                            last:border-b-0
+                            border-stone-100
+                            transition
+                            ${
+                              index === activeIndex
+                                ? "bg-[#F3EDE7]"
+                                : "hover:bg-stone-50"
+                            }
+                          `}
                         >
-                          <UserRound size={18} />
-                        </div>
 
-                        <div>
-                          <p className="font-semibold text-stone-800">
-                            {customer.fullName}
-                          </p>
+                          <div
+                            className="
+                              w-9
+                              h-9
+                              rounded-full
+                              bg-stone-100
+                              text-stone-600
+                              flex
+                              items-center
+                              justify-center
+                              shrink-0
+                            "
+                          >
+                            <UserRound size={17} />
+                          </div>
 
-                          <p className="text-sm text-stone-500">
-                            {customer.documentNumber}
-                          </p>
-                        </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-stone-800 truncate">
+                              {customer.fullName}
+                            </p>
 
-                      </button>
+                            <p className="text-sm text-stone-500 truncate">
+                              {customer.documentNumber}
+                              {customer.phone && ` · ${customer.phone}`}
+                            </p>
+                          </div>
 
-                    ))
+                        </button>
+
+                      ))}
+
+                    </div>
 
                   ) : (
 
-                    <div className="p-5 text-center text-stone-500">
-                      No encontramos ese cliente.
+                    <div className="p-5 text-center">
+
+                      <p className="text-sm text-stone-500">
+                        No encontramos ese cliente.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={openNewClientModal}
+                        className="
+                          mt-3
+                          inline-flex
+                          items-center
+                          gap-2
+                          px-4
+                          py-2.5
+                          rounded-lg
+                          bg-[#6F4E37]
+                          hover:bg-[#5B3F2D]
+                          text-white
+                          text-sm
+                          font-semibold
+                          transition
+                        "
+                      >
+                        <Plus size={16} />
+                        Crear cliente
+                      </button>
+
                     </div>
 
                   )}
+
+                  {/* ALTA RÁPIDA: siempre visible al final de la lista */}
+
+                  <button
+                    type="button"
+                    onClick={openNewClientModal}
+                    className="
+                      w-full
+                      flex
+                      items-center
+                      justify-center
+                      gap-2
+                      px-4
+                      py-3.5
+                      border-t
+                      border-stone-200
+                      bg-stone-50
+                      text-sm
+                      font-semibold
+                      text-[#6F4E37]
+                      hover:bg-[#F3EDE7]
+                      transition
+                    "
+                  >
+                    <Plus size={16} />
+                    Nuevo cliente
+                  </button>
 
                 </div>
 
@@ -801,6 +1136,97 @@ export default function NewSale({
               Descuento
             </label>
 
+            {/* ATAJOS DE PORCENTAJE */}
+
+            <div className="grid grid-cols-4 gap-2 mb-3">
+
+              {DISCOUNT_SHORTCUTS.map((pct) => {
+
+                const active = discountPct === pct;
+
+                return (
+
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => applyDiscountPct(pct)}
+                    aria-pressed={active}
+                    className={`
+                      py-2.5
+                      rounded-lg
+                      border
+                      text-xs
+                      sm:text-sm
+                      font-semibold
+                      transition
+                      ${
+                        active
+                          ? `
+                            bg-[#6F4E37]
+                            border-[#6F4E37]
+                            text-white
+                          `
+                          : `
+                            border-stone-300
+                            text-stone-600
+                            hover:border-[#6F4E37]/50
+                            hover:text-[#6F4E37]
+                            hover:bg-[#6F4E37]/5
+                          `
+                      }
+                    `}
+                  >
+                    {pct}%
+                  </button>
+
+                );
+
+              })}
+
+              {/* MANUAL: desactiva el porcentaje y enfoca el campo */}
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (discountPct !== null) {
+                    setDiscount(String(discountValue));
+                    setDiscountPct(null);
+                  }
+                  discountInputRef.current?.focus();
+                }}
+                aria-pressed={discountPct === null}
+                className={`
+                  py-2.5
+                  rounded-lg
+                  border
+                  text-xs
+                  sm:text-sm
+                  font-semibold
+                  transition
+                  ${
+                    discountPct === null
+                      ? `
+                        bg-[#6F4E37]
+                        border-[#6F4E37]
+                        text-white
+                      `
+                      : `
+                        border-stone-300
+                        text-stone-600
+                        hover:border-[#6F4E37]/50
+                        hover:text-[#6F4E37]
+                        hover:bg-[#6F4E37]/5
+                      `
+                  }
+                `}
+              >
+                Manual
+              </button>
+
+            </div>
+
+            {/* MONTO EN PESOS */}
+
             <div className="relative">
 
               <span
@@ -815,14 +1241,19 @@ export default function NewSale({
                 $
               </span>
 
-              <input
-                type="number"
-                min="0"
-                value={discount}
-                onChange={(event) =>
-                  setDiscount(event.target.value)
+              <MoneyInput
+                ref={discountInputRef}
+                value={
+                  discountPct !== null
+                    ? String(discountValue)
+                    : discount
                 }
+                onChange={(raw) => {
+                  setDiscountPct(null);
+                  setDiscount(raw);
+                }}
                 placeholder="0"
+                aria-label="Descuento en pesos"
                 className="
                   w-full
                   border
@@ -839,6 +1270,29 @@ export default function NewSale({
               />
 
             </div>
+
+            {/* FEEDBACK: lo que realmente se descuenta */}
+
+            {discountValue > 0 ? (
+
+              <p className="mt-2 text-sm font-semibold text-[#6F4E37]">
+
+                Ahorras {formatCurrency(discountValue)}{" "}
+
+                (
+                {discountPct ??
+                  Math.round((discountValue / (subtotal || 1)) * 100)}
+                % del subtotal)
+
+              </p>
+
+            ) : (
+
+              <p className="mt-2 text-xs text-stone-400">
+                Toca un porcentaje o escribe un valor en pesos.
+              </p>
+
+            )}
 
           </div>
 
@@ -1192,14 +1646,9 @@ export default function NewSale({
                   $
                 </span>
 
-                <input
-                  type="number"
-                  min="0"
-                  max={total}
+                <MoneyInput
                   value={receivedAmount}
-                  onChange={(event) =>
-                    setReceivedAmount(event.target.value)
-                  }
+                  onChange={setReceivedAmount}
                   placeholder="0"
                   className="
                     w-full
@@ -1285,13 +1734,9 @@ export default function NewSale({
                   $
                 </span>
 
-                <input
-                  type="number"
-                  min="0"
+                <MoneyInput
                   value={receivedAmount}
-                  onChange={(event) =>
-                    setReceivedAmount(event.target.value)
-                  }
+                  onChange={setReceivedAmount}
                   placeholder="0"
                   className="
                     w-full
@@ -1518,6 +1963,17 @@ export default function NewSale({
         )}
 
       </section>
+
+      {/* =========================================
+          MODAL NUEVO CLIENTE (alta desde la venta)
+      ========================================= */}
+
+      {showClientModal && (
+        <ClientFormModal
+          onClose={() => setShowClientModal(false)}
+          onSaved={handleClientSaved}
+        />
+      )}
 
     </div>
   );

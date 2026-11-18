@@ -18,8 +18,10 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, qs } from "../lib/api";
+import { SIZE_OPTIONS } from "../lib/catalog";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import type {
   Paginated,
   Product,
@@ -136,6 +138,17 @@ export default function ProductionPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Mini-modal: alta rápida de materia prima desde el select (sin salir a Productos)
+  const [rawCreateOpen, setRawCreateOpen] = useState(false);
+  const [rawCreateForm, setRawCreateForm] = useState({
+    name: "",
+    size: SIZE_OPTIONS[0] as string,
+    cost: "",
+    stock: "",
+  });
+  const [rawCreating, setRawCreating] = useState(false);
+  const [rawCreateError, setRawCreateError] = useState<string | null>(null);
+
   // Modal etapa
   const [stageOrder, setStageOrder] = useState<ProductionOrder | null>(null);
   const [stageForm, setStageForm] = useState({
@@ -239,6 +252,69 @@ export default function ProductionPage() {
       );
     } finally {
       setCreating(false);
+    }
+  }
+
+  // ----------------------------------------------------------
+  //  Alta rápida de materia prima desde el select de la orden
+  //  (evita salir a Productos y volver a abrir todo)
+  // ----------------------------------------------------------
+  async function handleCreateRaw(event: FormEvent) {
+    event.preventDefault();
+    if (rawCreating) return;
+    setRawCreateError(null);
+
+    const name = rawCreateForm.name.trim();
+    if (name.length < 2) {
+      setRawCreateError("Escribe el nombre de la materia prima (mínimo 2 letras).");
+      return;
+    }
+
+    const cost = Number(rawCreateForm.cost) || 0;
+    const stock = Number(rawCreateForm.stock) || 0;
+
+    setRawCreating(true);
+
+    try {
+      const created = await api.post<Product>("/products", {
+        name,
+        category: "MATERIA_PRIMA",
+        presentations: [
+          {
+            label: rawCreateForm.size,
+            grind: "GRANO",
+            // La materia prima no entra a las ventas (filtran TERMINADO):
+            // el precio solo existe para cumplir el esquema, manda el costo.
+            price: cost > 0 ? cost : 1,
+            cost,
+            stock,
+            minimumStock: 0,
+          },
+        ],
+      });
+
+      // Seleccionar la presentación creada en el select de la orden
+      const createdPresentation =
+        created.presentations.find(
+          (p) => p.label === rawCreateForm.size && p.isActive
+        ) ?? created.presentations[0];
+
+      setCreateForm((prev) => ({
+        ...prev,
+        rawMaterialPresentationId: createdPresentation.id,
+      }));
+
+      setRawCreateOpen(false);
+      setRawCreateForm({ name: "", size: SIZE_OPTIONS[0], cost: "", stock: "" });
+      await load(); // refresca rawOptions con la nueva materia prima
+    } catch (error) {
+      setRawCreateError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible crear la materia prima."
+      );
+    } finally {
+      setRawCreating(false);
     }
   }
 
@@ -654,9 +730,32 @@ export default function ProductionPage() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Materia prima *
-                </label>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <label className="block text-sm font-medium text-stone-700">
+                    Materia prima *
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRawCreateError(null);
+                      setRawCreateOpen(true);
+                    }}
+                    className="
+                      flex
+                      items-center
+                      gap-1
+                      text-xs
+                      font-semibold
+                      text-[#6F4E37]
+                      hover:text-[#5A3E2B]
+                      transition-colors
+                    "
+                  >
+                    <Plus size={14} />
+                    Nueva aquí
+                  </button>
+                </div>
 
                 <Select
                   value={createForm.rawMaterialPresentationId}
@@ -745,6 +844,137 @@ export default function ProductionPage() {
                   className={inputClass}
                 />
               </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ------------------------------------------------------
+          MODAL: ALTA RÁPIDA DE MATERIA PRIMA (desde el select)
+      ------------------------------------------------------ */}
+      {rawCreateOpen && (
+        <Modal
+          icon={Plus}
+          title="Nueva materia prima"
+          subtitle="Se creará con una presentación y quedará seleccionada en la orden."
+          onClose={() => setRawCreateOpen(false)}
+          onSubmit={(event) => void handleCreateRaw(event)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRawCreateOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-stone-600 hover:bg-stone-200 transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={rawCreating}
+                className="
+                  px-5
+                  py-2.5
+                  rounded-xl
+                  text-sm
+                  font-semibold
+                  text-white
+                  bg-[#6F4E37]
+                  hover:bg-[#5A3E2B]
+                  transition-colors
+                  disabled:opacity-60
+                  disabled:cursor-not-allowed
+                  flex
+                  items-center
+                  gap-2
+                "
+              >
+                {rawCreating && <Loader2 size={15} className="animate-spin" />}
+                {rawCreating ? "Creando…" : "Crear y seleccionar"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {rawCreateError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {rawCreateError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Nombre *
+              </label>
+
+              <input
+                type="text"
+                value={rawCreateForm.name}
+                onChange={(event) =>
+                  setRawCreateForm({ ...rawCreateForm, name: event.target.value })
+                }
+                placeholder="Ej. Cenicafe 250"
+                autoFocus
+                className={inputClass}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Tamaño *
+                </label>
+
+                <Select
+                  value={rawCreateForm.size}
+                  onChange={(value) =>
+                    setRawCreateForm({ ...rawCreateForm, size: value })
+                  }
+                  aria-label="Tamaño"
+                  options={SIZE_OPTIONS.map((size) => ({
+                    value: size,
+                    label: size,
+                    icon: Package,
+                  }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Stock inicial
+                </label>
+
+                <input
+                  type="number"
+                  min="0"
+                  value={rawCreateForm.stock}
+                  onChange={(event) =>
+                    setRawCreateForm({ ...rawCreateForm, stock: event.target.value })
+                  }
+                  placeholder="0"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Costo por kilo
+              </label>
+
+              <MoneyInput
+                value={rawCreateForm.cost}
+                onChange={(raw) =>
+                  setRawCreateForm({ ...rawCreateForm, cost: raw })
+                }
+                placeholder="Ej. 18.000"
+                className={inputClass}
+              />
+
+              <p className="text-xs text-stone-500 mt-2">
+                Es el costo interno de producción; nunca se muestra al cliente.
+              </p>
+            </div>
           </div>
         </Modal>
       )}

@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { api, ApiError, qs } from "../lib/api";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import type { Invoice, Paginated, PaymentMethod } from "../types/api";
 
 type AccountStatus = "Pendiente" | "Vencida" | "Abonada";
@@ -670,14 +671,12 @@ export default function Cartera() {
                     $
                   </span>
 
-                  <input
-                    type="number"
-                    min="1"
+                  <MoneyInput
                     value={payForm.amount}
-                    onChange={(event) =>
-                      setPayForm({ ...payForm, amount: event.target.value })
+                    onChange={(raw) =>
+                      setPayForm({ ...payForm, amount: raw })
                     }
-                    placeholder="50000"
+                    placeholder="50.000"
                     className="w-full border border-stone-300 rounded-xl pl-9 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]"
                   />
                 </div>

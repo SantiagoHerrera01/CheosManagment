@@ -224,6 +224,7 @@ router.post(
  *             type: object
  *             properties:
  *               price: { type: number, example: 12900 }
+ *               wholesalePrice: { type: number, example: 11500, description: Precio de mayoreo (null lo quita) }
  *               cost: { type: number, example: 8000 }
  *               minimumStock: { type: integer, example: 20 }
  *               isActive: { type: boolean }

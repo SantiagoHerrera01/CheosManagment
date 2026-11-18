@@ -8,7 +8,9 @@ import {
   Receipt,
   UserRound,
   AlertTriangle,
+  CheckCircle2,
   Loader2,
+  MessageCircle,
 } from "lucide-react";
 
 import { useState, type FormEvent } from "react";
@@ -21,9 +23,11 @@ import type {
 
 import SaleDetailModal from "./SaleDetailModal";
 import { INVOICE_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "../../lib/labels";
+import { paymentMessage, whatsappLink } from "../../lib/whatsapp";
 
 import Select from "../ui/Select";
 import Modal from "../ui/Modal";
+import MoneyInput from "../ui/MoneyInput";
 
 type PayMethod = "ABONO" | "EFECTIVO" | "TRANSFERENCIA";
 
@@ -96,6 +100,14 @@ export default function SalesTable({
     useState<string | null>(null);
 
   /*
+   * ÉXITO DEL ABONO: se guarda la factura fresca devuelta por el
+   * backend (trae el saldo nuevo) más el valor abonado, para ofrecer
+   * el envío por WhatsApp desde la misma confirmación.
+   */
+  const [paidResult, setPaidResult] =
+    useState<{ invoice: Invoice; amount: number } | null>(null);
+
+  /*
    * ANULAR FACTURA
    */
   const [voidingInvoice, setVoidingInvoice] =
@@ -158,7 +170,7 @@ export default function SalesTable({
     setPayError(null);
 
     try {
-      await api.post<Invoice>(
+      const updated = await api.post<Invoice>(
         `/invoices/${payingInvoice.id}/payments`,
         {
           amount,
@@ -168,6 +180,7 @@ export default function SalesTable({
       );
 
       setPayingInvoice(null);
+      setPaidResult({ invoice: updated, amount });
       reload();
     } catch (error) {
       setPayError(
@@ -782,15 +795,10 @@ export default function SalesTable({
                   Monto a abonar *
                 </label>
 
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
+                <MoneyInput
                   value={payAmount}
-                  onChange={(event) =>
-                    setPayAmount(event.target.value)
-                  }
-                  placeholder="Ej. 50000"
+                  onChange={setPayAmount}
+                  placeholder="Ej. 50.000"
                   className="
                     w-full
                     border
@@ -872,6 +880,145 @@ export default function SalesTable({
 
         </Modal>
 
+      )}
+
+      {/* =========================================
+          CONFIRMACIÓN DE ABONO EXITOSO
+      ========================================= */}
+
+      {paidResult && (
+        <Modal
+          icon={CheckCircle2}
+          title="Abono registrado"
+          subtitle={`Factura #${paidResult.invoice.number}`}
+          onClose={() => setPaidResult(null)}
+          size="md"
+          footer={
+            <div
+              className="
+                flex
+                flex-col-reverse
+                sm:flex-row
+                gap-3
+                sm:justify-end
+              "
+            >
+
+              <button
+                type="button"
+                onClick={() => setPaidResult(null)}
+                className="
+                  w-full
+                  sm:w-auto
+                  px-5
+                  py-3
+                  rounded-xl
+                  bg-[#6F4E37]
+                  hover:bg-[#5B3F2D]
+                  text-white
+                  font-semibold
+                  transition
+                "
+              >
+                Listo
+              </button>
+
+              {paidResult.invoice.client.phone && (
+                <a
+                  href={whatsappLink(
+                    paidResult.invoice.client.phone,
+                    paymentMessage(paidResult.invoice, paidResult.amount)
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="
+                    w-full
+                    sm:w-auto
+                    flex
+                    items-center
+                    justify-center
+                    gap-2
+                    px-5
+                    py-3
+                    rounded-xl
+                    bg-emerald-600
+                    hover:bg-emerald-700
+                    text-white
+                    font-semibold
+                    transition
+                  "
+                >
+                  <MessageCircle size={18} />
+                  Enviar por WhatsApp
+                </a>
+              )}
+
+            </div>
+          }
+        >
+
+          <div className="space-y-4">
+
+            <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+              Se abonaron{" "}
+              <span className="font-bold">
+                {formatCurrency(paidResult.amount)}
+              </span>{" "}
+              a la factura de {paidResult.invoice.client.fullName}.
+            </div>
+
+            <div
+              className="
+                rounded-xl
+                bg-stone-50
+                border
+                border-stone-200
+                p-4
+                flex
+                items-center
+                justify-between
+                gap-4
+              "
+            >
+
+              <div>
+                <p className="text-xs text-stone-500">Total factura</p>
+                <p className="font-semibold text-stone-800 mt-1">
+                  {formatCurrency(paidResult.invoice.total)}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-xs text-stone-500">
+                  {paidResult.invoice.balance > 0
+                    ? "Saldo restante"
+                    : "Estado"}
+                </p>
+                <p
+                  className={
+                    paidResult.invoice.balance > 0
+                      ? "font-bold text-red-600 mt-1"
+                      : "font-bold text-green-600 mt-1"
+                  }
+                >
+                  {paidResult.invoice.balance > 0
+                    ? formatCurrency(paidResult.invoice.balance)
+                    : "PAGADA"}
+                </p>
+              </div>
+
+            </div>
+
+            {!paidResult.invoice.client.phone && (
+              <p className="text-sm text-stone-500 text-center">
+                El cliente no tiene celular registrado: no se puede enviar
+                por WhatsApp.
+              </p>
+            )}
+
+          </div>
+
+        </Modal>
       )}
 
       {/* =========================================

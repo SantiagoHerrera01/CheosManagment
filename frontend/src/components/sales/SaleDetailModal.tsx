@@ -10,17 +10,19 @@ import {
   Clock3,
   AlertTriangle,
   Ban,
+  FileText,
   MessageCircle,
   Package,
   Loader2,
 } from "lucide-react";
 
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, apiUrl } from "../../lib/api";
 import Modal from "../ui/Modal";
 import {
   INVOICE_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
 } from "../../lib/labels";
+import { saleMessage, whatsappLink } from "../../lib/whatsapp";
 import type { Invoice } from "../../types/api";
 
 type SaleDetailModalProps = {
@@ -40,32 +42,14 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-CO");
 }
 
-/**
- * Normaliza un celular colombiano para wa.me: solo dÃ­gitos, sin cero inicial
- * y con prefijo 57 (R9).
- */
-function whatsappPhone(phone: string): string {
-  let digits = phone.replace(/\D/g, "");
-
-  if (digits.startsWith("0")) {
-    digits = digits.slice(1);
-  }
-
-  if (!digits.startsWith("57")) {
-    digits = `57${digits}`;
-  }
-
-  return digits;
-}
-
 export default function SaleDetailModal({
   invoice,
   onClose,
 }: SaleDetailModalProps) {
   /*
-   * El detalle fresco se guarda junto al id al que pertenece: asÃ­, al cambiar
+   * El detalle fresco se guarda junto al id al que pertenece: así, al cambiar
    * de factura, los valores derivados de abajo se "resetean" solos y no hace
-   * falta (ni se permite) hacer setState sÃ­ncrono dentro del effect.
+   * falta (ni se permite) hacer setState síncrono dentro del effect.
    */
   const [result, setResult] = useState<{
     id: string;
@@ -191,7 +175,7 @@ export default function SaleDetailModal({
       onClose={onClose}
       size="lg"
       footer={
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
 
           <p className="text-sm text-stone-500">
             Factura creada por{" "}
@@ -200,61 +184,82 @@ export default function SaleDetailModal({
             </span>
           </p>
 
-          <div className="flex items-center gap-3">
-
-            {current.client.phone && (
-              <a
-                href={`https://wa.me/${whatsappPhone(current.client.phone)}?text=${encodeURIComponent(
-                  `Hola ${current.client.fullName}, te compartimos el detalle de la factura ${current.number}: total ${formatCurrency(
-                    current.total
-                  )}${
-                    current.balance > 0
-                      ? ` con saldo pendiente de ${formatCurrency(current.balance)}`
-                      : " (pagada)"
-                  }. Â¡Gracias por tu compra! â˜•`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="
-                  w-full
-                  sm:w-auto
-                  flex
-                  items-center
-                  justify-center
-                  gap-2
-                  px-5
-                  py-3
-                  rounded-xl
-                  bg-emerald-600
-                  hover:bg-emerald-700
-                  text-white
-                  font-semibold
-                  transition
-                "
-              >
-                <MessageCircle size={18} />
-                Enviar por WhatsApp
-              </a>
-            )}
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
 
             <button
               type="button"
               onClick={onClose}
               className="
-                w-full
-                sm:w-auto
-                px-5
-                py-3
-                rounded-xl
-                bg-[#6F4E37]
-                hover:bg-[#5B3F2D]
-                text-white
-                font-semibold
+                px-4
+                py-2
+                rounded-lg
+                text-sm
+                font-medium
+                text-stone-600
+                hover:bg-stone-100
+                hover:text-stone-800
                 transition
               "
             >
               Cerrar
             </button>
+
+            <a
+              href={apiUrl(`/invoices/${current.id}/pdf`)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="
+                flex
+                items-center
+                justify-center
+                gap-1.5
+                whitespace-nowrap
+                shrink-0
+                px-4
+                py-2
+                rounded-lg
+                border
+                border-stone-300
+                text-sm
+                font-medium
+                text-stone-700
+                hover:border-[#6F4E37]/50
+                hover:text-[#6F4E37]
+                hover:bg-[#6F4E37]/5
+                transition
+              "
+            >
+              <FileText size={15} />
+              Ver factura PDF
+            </a>
+
+            {current.client.phone && (
+              <a
+                href={whatsappLink(current.client.phone, saleMessage(current))}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="
+                  flex
+                  items-center
+                  justify-center
+                  gap-1.5
+                  whitespace-nowrap
+                  shrink-0
+                  px-4
+                  py-2
+                  rounded-lg
+                  bg-emerald-600
+                  hover:bg-emerald-700
+                  text-white
+                  text-sm
+                  font-medium
+                  transition
+                "
+              >
+                <MessageCircle size={15} />
+                Enviar por WhatsApp
+              </a>
+            )}
 
           </div>
 
@@ -281,12 +286,12 @@ export default function SaleDetailModal({
               />
 
               <p className="mt-3 text-sm text-stone-500">
-                Cargando detalleâ€¦
+                Cargando detalle…
               </p>
             </div>
           )}
 
-          {/* INFORMACIÃ“N GENERAL */}
+          {/* INFORMACIÓN GENERAL */}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
@@ -332,7 +337,7 @@ export default function SaleDetailModal({
 
           </div>
 
-          {/* ESTADO Y MÃ‰TODO */}
+          {/* ESTADO Y MÉTODO */}
 
           <div className="border border-stone-200 rounded-xl p-4">
 
@@ -368,7 +373,7 @@ export default function SaleDetailModal({
                 </div>
 
                 <span className="text-sm">
-                  MÃ©todo de pago
+                  Método de pago
                 </span>
               </div>
 
@@ -581,7 +586,7 @@ export default function SaleDetailModal({
 
                       <p className="text-xs text-stone-500 mt-0.5">
                         {PAYMENT_METHOD_LABELS[payment.method]}
-                        {payment.notes ? ` Â· ${payment.notes}` : ""}
+                        {payment.notes ? ` · ${payment.notes}` : ""}
                       </p>
 
                     </div>

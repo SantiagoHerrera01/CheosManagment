@@ -64,6 +64,8 @@ export interface Presentation {
   label: string;
   grind: Grind;
   price: number;
+  /** Precio de mayoreo opcional (P1-3): él vende más barato por mayor. */
+  wholesalePrice?: number | null;
   /** Solo lo envían los roles ADMIN y CONTADOR. */
   cost?: number;
   stock: number;
@@ -113,6 +115,8 @@ export interface InvoicePayment {
 export interface Invoice {
   id: string;
   number: string;
+  /** Firma del link público del PDF (ver `invoicePdfUrl` en lib/whatsapp). */
+  pdfToken: string;
   client: {
     id: string;
     fullName: string;
@@ -138,7 +142,12 @@ export interface Invoice {
 
 export interface CreateInvoiceInput {
   clientId: string;
-  items: Array<{ presentationId: string; quantity: number }>;
+  items: Array<{
+    presentationId: string;
+    quantity: number;
+    /** Cobra el precio de mayoreo de la presentación si existe (P1-3). */
+    wholesale?: boolean;
+  }>;
   discount?: number;
   paymentMethod: PaymentMethod;
   initialPayment?: number | null;

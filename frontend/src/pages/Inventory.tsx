@@ -21,6 +21,7 @@ import {
 import { api, ApiError, qs } from "../lib/api";
 import { useAuth } from "../context/auth-context";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import Select from "../components/ui/Select";
 import type {
   InventoryMovement,
@@ -140,6 +141,19 @@ export default function Inventory() {
 
   const [showMovements, setShowMovements] =
     useState(false);
+
+  // Actualizar costo desde Inventario (P0-2 / P1-5 del to-do post-demo)
+  const [isCostModalOpen, setIsCostModalOpen] =
+    useState(false);
+
+  const [costValue, setCostValue] =
+    useState("");
+
+  const [costSaving, setCostSaving] =
+    useState(false);
+
+  const [costError, setCostError] =
+    useState<string | null>(null);
 
   /** Trae los productos activos y aplana producto × presentación (sin estado). */
   const fetchInventory = useCallback(async () => {
@@ -415,6 +429,62 @@ export default function Inventory() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ---------------------------------------------------------
+  //  Actualizar costo desde Inventario (P0-2 / P1-5)
+  //  Usa el PATCH /products/:id/presentations/:presentationId (solo admin).
+  // ---------------------------------------------------------
+  const openCostModal = (item: InventoryItem) => {
+    setSelectedKey(item.presentationId);
+    setCostValue(
+      item.cost !== undefined ? String(item.cost) : ""
+    );
+    setCostError(null);
+    setIsCostModalOpen(true);
+  };
+
+  const closeCostModal = () => {
+    setIsCostModalOpen(false);
+    setSelectedKey("");
+    setCostValue("");
+    setCostError(null);
+  };
+
+  const handleCostSave = async () => {
+    if (!selectedItem) {
+      return;
+    }
+
+    const numericCost = Number(costValue);
+
+    if (!Number.isFinite(numericCost) || numericCost < 0) {
+      setCostError(
+        "El costo debe ser un número mayor o igual a cero."
+      );
+      return;
+    }
+
+    setCostSaving(true);
+    setCostError(null);
+
+    try {
+      await api.patch(
+        `/products/${selectedItem.productId}/presentations/${selectedItem.presentationId}`,
+        { cost: numericCost }
+      );
+
+      closeCostModal();
+      await loadInventory();
+    } catch (error) {
+      setCostError(
+        error instanceof ApiError
+          ? error.message
+          : "No fue posible actualizar el costo."
+      );
+    } finally {
+      setCostSaving(false);
     }
   };
 
@@ -990,6 +1060,33 @@ export default function Inventory() {
 
                         <div className="flex justify-end items-center gap-1">
 
+                          {hasRole("ADMIN") && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openCostModal(
+                                  item
+                                )
+                              }
+                              title="Actualizar costo"
+                              className="
+                                w-9
+                                h-9
+                                rounded-lg
+                                flex
+                                items-center
+                                justify-center
+                                text-stone-600
+                                hover:bg-stone-100
+                                transition
+                              "
+                            >
+                              <CircleDollarSign
+                                size={17}
+                              />
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() =>
@@ -1459,6 +1556,154 @@ export default function Inventory() {
                   focus:ring-[#6F4E37]/20
                 "
               />
+
+            </div>
+
+          </div>
+
+        </Modal>
+      )}
+
+      {/* ACTUALIZAR COSTO */}
+      {isCostModalOpen && (
+        <Modal
+          icon={CircleDollarSign}
+          title="Actualizar costo"
+          subtitle="Costo interno de la presentación seleccionada."
+          onClose={closeCostModal}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-3">
+
+              <button
+                type="button"
+                onClick={closeCostModal}
+                disabled={costSaving}
+                className="
+                  px-5
+                  py-3
+                  rounded-xl
+                  border
+                  border-stone-300
+                  text-stone-700
+                  font-medium
+                  hover:bg-stone-50
+                  disabled:opacity-40
+                  disabled:cursor-not-allowed
+                "
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleCostSave()}
+                disabled={
+                  costValue === "" ||
+                  Number.isNaN(Number(costValue)) ||
+                  Number(costValue) < 0 ||
+                  costSaving
+                }
+                className="
+                  inline-flex
+                  items-center
+                  gap-2
+                  px-5
+                  py-3
+                  rounded-xl
+                  bg-[#6F4E37]
+                  hover:bg-[#5B3F2D]
+                  disabled:opacity-40
+                  disabled:cursor-not-allowed
+                  text-white
+                  font-semibold
+                "
+              >
+                {costSaving && (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                )}
+
+                {costSaving
+                  ? "Guardando…"
+                  : "Guardar costo"}
+              </button>
+
+            </div>
+          }
+        >
+
+          <div className="space-y-5">
+
+            {/* ERROR */}
+            {costError && (
+              <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+                {costError}
+              </div>
+            )}
+
+            {/* PRODUCTO */}
+            {selectedItem && (
+              <div className="rounded-xl bg-stone-50 border border-stone-200 p-4">
+
+                <p className="text-sm font-medium text-stone-700">
+                  {selectedItem.product}
+                </p>
+
+                <p className="text-xs text-stone-500 mt-1">
+                  {selectedItem.presentation} · {selectedItem.type}
+                </p>
+
+              </div>
+            )}
+
+            {/* COSTO ACTUAL */}
+            {selectedItem && (
+              <div className="flex justify-between text-sm">
+
+                <span className="text-stone-500">
+                  Costo actual
+                </span>
+
+                <strong className="text-stone-800">
+                  {selectedItem.cost !== undefined
+                    ? formatCurrency(selectedItem.cost)
+                    : "No disponible"}
+                </strong>
+
+              </div>
+            )}
+
+            {/* NUEVO COSTO */}
+            <div>
+
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Nuevo costo
+              </label>
+
+              <MoneyInput
+                value={costValue}
+                onChange={setCostValue}
+                placeholder="0"
+                className="
+                  w-full
+                  border
+                  border-stone-300
+                  rounded-xl
+                  px-4
+                  py-3
+                  outline-none
+                  focus:border-[#6F4E37]
+                  focus:ring-2
+                  focus:ring-[#6F4E37]/20
+                "
+              />
+
+              <p className="text-xs text-stone-400 mt-2">
+                Valor al que compraste la última vez. Se usa para la utilidad y el valor del inventario.
+              </p>
 
             </div>
 

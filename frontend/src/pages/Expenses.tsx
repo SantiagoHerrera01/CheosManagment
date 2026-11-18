@@ -22,6 +22,7 @@ import { useAuth } from "../context/auth-context";
 import { api, ApiError, qs } from "../lib/api";
 import { EXPENSE_CATEGORIES, type Expense, type ExpenseCategory, type Paginated } from "../types/api";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import Select, { type SelectOption } from "../components/ui/Select";
 
 /** Icono decorativo por categoría de gasto. */
@@ -561,15 +562,12 @@ export default function Expenses() {
                   Valor *
                 </label>
 
-                <input
-                  type="number"
+                <MoneyInput
                   required
-                  min="1"
-                  step="any"
-                  placeholder="45000"
+                  placeholder="45.000"
                   value={form.amount}
-                  onChange={(event) =>
-                    setForm({ ...form, amount: event.target.value })
+                  onChange={(raw) =>
+                    setForm({ ...form, amount: raw })
                   }
                   className={inputClass}
                 />

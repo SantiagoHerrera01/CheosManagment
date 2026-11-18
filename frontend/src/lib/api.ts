@@ -20,6 +20,18 @@ const BASE_URL: string =
   (import.meta.env.VITE_API_URL as string | undefined) ??
   (import.meta.env.DEV ? "http://localhost:3000/api" : "/api");
 
+/**
+ * URL absoluta de un recurso de la API.
+ *
+ * En producción `BASE_URL` es relativa (`/api`, mismo origen), así que para
+ * links que viajan fuera de la app (WhatsApp, correo) hay que completarlos
+ * con el origen actual. En desarrollo ya viene absoluta.
+ */
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//.test(BASE_URL)) return `${BASE_URL}${path}`;
+  return `${window.location.origin}${BASE_URL}${path}`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;

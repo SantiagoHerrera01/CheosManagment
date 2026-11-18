@@ -14,6 +14,7 @@ import {
 
 import { api, ApiError, qs } from "../lib/api";
 import Modal from "../components/ui/Modal";
+import MoneyInput from "../components/ui/MoneyInput";
 import Select from "../components/ui/Select";
 import type {
   BankAccount,
@@ -632,16 +633,14 @@ export default function Banks() {
                   Monto *
                 </label>
 
-                <input
-                  type="number"
+                <MoneyInput
                   required
-                  step="any"
-                  placeholder="50000"
+                  placeholder="50.000"
                   value={movementForm.amount}
-                  onChange={(event) =>
+                  onChange={(raw) =>
                     setMovementForm({
                       ...movementForm,
-                      amount: event.target.value,
+                      amount: raw,
                     })
                   }
                   className={inputClass}

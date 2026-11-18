@@ -25,6 +25,8 @@ export function serializePresentation(
     label: p.label,
     grind: p.grind,
     price: money(p.price),
+    /** Precio de mayoreo (opcional, visible para todos los roles). */
+    wholesalePrice: p.wholesalePrice !== null ? money(p.wholesalePrice) : null,
     /** Solo admin y contador ven el costo interno; el vendedor no (R7). */
     cost: includeCost ? money(p.cost) : undefined,
     stock: p.stock,
@@ -114,6 +116,7 @@ export async function create(input: CreateProductInput) {
           label: p.label,
           grind: p.grind,
           price: p.price,
+          wholesalePrice: p.wholesalePrice ?? null,
           cost: p.cost,
           stock: p.stock,
           minimumStock: p.minimumStock,
@@ -153,6 +156,7 @@ export async function addPresentation(productId: string, input: CreatePresentati
       label: input.label,
       grind: input.grind,
       price: input.price,
+      wholesalePrice: input.wholesalePrice ?? null,
       cost: input.cost,
       stock: input.stock,
       minimumStock: input.minimumStock,
@@ -176,6 +180,9 @@ export async function updatePresentation(
       ...(input.label !== undefined ? { label: input.label } : {}),
       ...(input.grind !== undefined ? { grind: input.grind } : {}),
       ...(input.price !== undefined ? { price: input.price } : {}),
+      ...(input.wholesalePrice !== undefined
+        ? { wholesalePrice: input.wholesalePrice }
+        : {}),
       ...(input.cost !== undefined ? { cost: input.cost } : {}),
       ...(input.minimumStock !== undefined ? { minimumStock: input.minimumStock } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),

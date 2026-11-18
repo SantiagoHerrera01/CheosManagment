@@ -6,7 +6,7 @@ import {
   Package,
   Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { api, ApiError, qs } from "../../lib/api";
 import type { Grind, Paginated, Product } from "../../types/api";
@@ -16,6 +16,13 @@ export type CartItem = {
   presentationId: string;
   productName: string;
   presentationLabel: string;
+  /** Precio regular de la presentación (nunca se pierde al alternar). */
+  regularPrice: number;
+  /** Precio de mayoreo si la presentación lo tiene configurado (P1-3). */
+  wholesalePrice: number | null;
+  /** ¿Se está cobrando el precio de mayoreo en esta línea? */
+  wholesale: boolean;
+  /** Precio aplicado en esta línea (regular o mayoreo). */
   price: number;
   quantity: number;
 };
@@ -28,6 +35,7 @@ type CatalogOption = {
   label: string;
   grind: Grind;
   price: number;
+  wholesalePrice: number | null;
   stock: number;
 };
 
@@ -38,6 +46,17 @@ type SaleProductsProps = {
 
 function grindLabel(grind: Grind) {
   return grind === "GRANO" ? "Grano" : "Molido";
+}
+
+/**
+ * Normaliza texto para buscar: sin tildes ni mayúsculas.
+ * "Café Castillo" se encuentra escribiendo "cafe", "CAFE" o "castillo".
+ */
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function formatCurrency(value: number) {
@@ -61,6 +80,7 @@ function flattenCatalog(products: Product[]): CatalogOption[] {
         label: presentation.label,
         grind: presentation.grind,
         price: presentation.price,
+        wholesalePrice: presentation.wholesalePrice ?? null,
         stock: presentation.stock,
       }))
   );
@@ -77,6 +97,13 @@ export default function SaleProducts({
   const [search, setSearch] = useState("");
   const [selectedOption, setSelectedOption] =
     useState<CatalogOption | null>(null);
+
+  /** Autocomplete: lista visible, fila resaltada con teclado y clic fuera. */
+  const [openList, setOpenList] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   /** Descarga y aplana el catálogo (sin tocar estado). */
   const fetchCatalog = useCallback(async () => {
@@ -128,20 +155,84 @@ export default function SaleProducts({
   );
 
   const filteredOptions = useMemo(() => {
-    const value = search.toLowerCase().trim();
+    const value = normalize(search.trim());
 
     if (!value) {
-      return availableOptions;
+      // Con el campo vacío (foco en el input) muestra el catálogo completo,
+      // acotado para que en móvil no se despliegue una lista gigante.
+      return availableOptions.slice(0, 30);
     }
 
     return availableOptions.filter(
       (option) =>
-        option.productName.toLowerCase().includes(value) ||
-        (option.productVariety ?? "").toLowerCase().includes(value) ||
-        (option.productProcess ?? "").toLowerCase().includes(value) ||
-        option.label.toLowerCase().includes(value)
+        normalize(option.productName).includes(value) ||
+        normalize(option.productVariety ?? "").includes(value) ||
+        normalize(option.productProcess ?? "").includes(value) ||
+        normalize(option.label).includes(value)
     );
   }, [availableOptions, search]);
+
+  /** Elige una opción del autocomplete: abre el paso de configuración. */
+  const selectOption = (option: CatalogOption) => {
+    setSelectedOption(option);
+    setOpenList(false);
+    setActiveIndex(-1);
+    setSearch("");
+  };
+
+  /** Navegación con teclado del autocomplete (↑ ↓ Enter Escape). */
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpenList(true);
+      setActiveIndex((current) =>
+        Math.min(current + 1, filteredOptions.length - 1)
+      );
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      const option = filteredOptions[activeIndex];
+      if (openList && option) {
+        event.preventDefault();
+        selectOption(option);
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (openList) {
+        event.stopPropagation();
+        setOpenList(false);
+        setActiveIndex(-1);
+      }
+    }
+  };
+
+  // Clic fuera del buscador → se pliega la lista de sugerencias.
+  useEffect(() => {
+    if (!openList) return;
+
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        !searchWrapRef.current?.contains(target) &&
+        !listRef.current?.contains(target)
+      ) {
+        setOpenList(false);
+        setActiveIndex(-1);
+      }
+    }
+
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [openList]);
 
   const stockOf = (presentationId: string) =>
     options.find(
@@ -193,6 +284,9 @@ export default function SaleProducts({
           presentationId: option.presentationId,
           productName: option.productName,
           presentationLabel: `${option.label} · ${grindLabel(option.grind)}`,
+          regularPrice: option.price,
+          wholesalePrice: option.wholesalePrice,
+          wholesale: false,
           price: option.price,
           quantity: 1,
         },
@@ -239,6 +333,25 @@ export default function SaleProducts({
     );
   };
 
+  /** Alterna entre precio regular y precio de mayoreo en una línea (P1-3). */
+  const toggleWholesale = (id: string) => {
+    onItemsChange(
+      items.map((item) => {
+        if (item.id !== id || item.wholesalePrice === null) {
+          return item;
+        }
+
+        const next = !item.wholesale;
+
+        return {
+          ...item,
+          wholesale: next,
+          price: next ? item.wholesalePrice : item.regularPrice,
+        };
+      })
+    );
+  };
+
   return (
     <section className="bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
 
@@ -267,8 +380,8 @@ export default function SaleProducts({
 
       <div className="p-5 sm:p-6 space-y-6">
 
-        {/* BUSCADOR */}
-        <div className="relative">
+        {/* BUSCADOR (autocomplete) */}
+        <div className="relative" ref={searchWrapRef}>
 
           <Search
             size={19}
@@ -287,7 +400,16 @@ export default function SaleProducts({
             onChange={(event) => {
               setSearch(event.target.value);
               setSelectedOption(null);
+              setOpenList(true);
+              setActiveIndex(-1);
             }}
+            onFocus={() => setOpenList(true)}
+            onKeyDown={handleSearchKeyDown}
+            role="combobox"
+            aria-expanded={openList}
+            aria-controls="sale-product-list"
+            aria-autocomplete="list"
+            autoComplete="off"
             placeholder="Buscar producto..."
             className="
               w-full
@@ -370,15 +492,23 @@ export default function SaleProducts({
 
         )}
 
-        {/* RESULTADOS */}
+        {/* RESULTADOS (autocomplete) */}
         {!loading &&
           !loadError &&
-          search.trim() !== "" &&
+          openList &&
           !selectedOption && (
 
-          <div className="border border-stone-200 rounded-xl overflow-hidden">
+          <div
+            id="sale-product-list"
+            role="listbox"
+            aria-label="Productos del catálogo"
+            ref={listRef}
+            className="border border-stone-200 rounded-xl overflow-hidden"
+          >
 
-            {filteredOptions.map((option) => {
+            <div className="max-h-72 overflow-y-auto">
+
+            {filteredOptions.map((option, index) => {
 
               const meta = [option.productVariety, option.productProcess]
                 .filter(Boolean)
@@ -389,8 +519,11 @@ export default function SaleProducts({
                 <button
                   key={option.presentationId}
                   type="button"
-                  onClick={() => setSelectedOption(option)}
-                  className="
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  onClick={() => selectOption(option)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  className={`
                     w-full
                     text-left
                     flex
@@ -402,9 +535,13 @@ export default function SaleProducts({
                     border-b
                     last:border-b-0
                     border-stone-100
-                    hover:bg-stone-50
                     transition
-                  "
+                    ${
+                      index === activeIndex
+                        ? "bg-[#F3EDE7]"
+                        : "hover:bg-stone-50"
+                    }
+                  `}
                 >
 
                   <div>
@@ -440,6 +577,8 @@ export default function SaleProducts({
               );
 
             })}
+
+            </div>
 
             {filteredOptions.length === 0 && (
               <div className="p-5 text-center text-stone-500">
@@ -650,6 +789,24 @@ export default function SaleProducts({
                       <p className="text-sm font-semibold text-[#6F4E37] mt-2">
                         {formatCurrency(item.price)} unidad
                       </p>
+
+                      {/* MAYOREO (P1-3) */}
+                      {item.wholesalePrice !== null && (
+                        <button
+                          type="button"
+                          onClick={() => toggleWholesale(item.id)}
+                          title="Alterna entre el precio regular y el precio de mayoreo"
+                          className={
+                            item.wholesale
+                              ? "mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-3 py-1 text-xs font-semibold hover:bg-emerald-200 transition"
+                              : "mt-2 inline-flex items-center gap-1 rounded-full bg-stone-100 text-stone-600 px-3 py-1 text-xs font-medium hover:bg-stone-200 transition"
+                          }
+                        >
+                          {item.wholesale
+                            ? `✓ Mayoreo ${formatCurrency(item.price)} — tocar para precio regular`
+                            : `Mayoreo ${formatCurrency(item.wholesalePrice)} — aplicar`}
+                        </button>
+                      )}
 
                     </div>
 

@@ -134,6 +134,7 @@ model ProductPresentation {
   grind Grind
 
   price Decimal // precio de venta parametrizado (lo paga el cliente final)
+  wholesalePrice Decimal? // precio de mayoreo opcional: él vende más barato por mayor (P1-3)
   cost  Decimal @default(0) // costo interno de producción (NUNCA se expone al cliente)
 
   stock        Int    @default(0)

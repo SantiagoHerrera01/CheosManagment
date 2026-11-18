@@ -9,6 +9,7 @@ import type {
 
 import prisma from "../../shared/database/prisma.js";
 import { ApiError } from "../../shared/errors/api-error.js";
+import { signToken } from "../../shared/utils/share-token.js";
 import { money } from "../../shared/utils/money.js";
 import { pageParams, type Pagination } from "../../shared/utils/pagination.js";
 import type {
@@ -45,6 +46,9 @@ export function serializeInvoice(invoice: InvoiceWithRelations, includeItems = t
   return {
     id: invoice.id,
     number: invoice.number,
+    // Firma del link público del PDF: quien la recibe (WhatsApp/correo)
+    // puede abrir la factura sin sesión y sin poder adivinar otras.
+    pdfToken: signToken(invoice.id),
     client: invoice.client,
     issueDate: invoice.issueDate,
     dueDate: invoice.dueDate,
@@ -144,7 +148,12 @@ export async function create(input: CreateInvoiceInput, userId: string) {
     // Valida y arma las líneas con precios ACTUALES de la BD (nunca del cliente)
     const lines = input.items.map((item) => {
       const p = byId.get(item.presentationId) as PresentationWithProduct;
-      const unitPrice = money(p.price);
+      // Precio de mayoreo (P1-3): solo aplica si la presentación lo tiene
+      // configurado; si no, se cobra el precio regular.
+      const unitPrice =
+        item.wholesale && p.wholesalePrice !== null
+          ? money(p.wholesalePrice)
+          : money(p.price);
       return {
         presentationId: p.id,
         productName: p.product.name,
@@ -293,7 +302,19 @@ const baseInclude = {
   payments: { orderBy: { paidAt: "asc" as const } },
 };
 
+/**
+ * Normaliza el texto de búsqueda de la lista de facturas.
+ * La tabla muestra "#F-000006" pero en BD el número es "F-000006": sin
+ * quitar el "#" (y los espacios de más) la búsqueda devuelve 0 filas.
+ * "  #F-000006 " → "F-000006".
+ */
+function normalizeSearch(raw: string): string {
+  return raw.replace(/#/g, "").replace(/\s+/g, " ").trim();
+}
+
 export async function list(pagination: Pagination, query: ListInvoicesQuery) {
+  const q = query.q ? normalizeSearch(query.q) : "";
+
   const where: Prisma.InvoiceWhereInput = {
     ...(query.clientId ? { clientId: query.clientId } : {}),
     ...(query.status ? { status: query.status } : {}),
@@ -305,12 +326,12 @@ export async function list(pagination: Pagination, query: ListInvoicesQuery) {
           },
         }
       : {}),
-    ...(query.q
+    ...(q
       ? {
           OR: [
-            { number: { contains: query.q, mode: "insensitive" } },
-            { client: { fullName: { contains: query.q, mode: "insensitive" } } },
-            { client: { documentNumber: { contains: query.q } } },
+            { number: { contains: q, mode: "insensitive" } },
+            { client: { fullName: { contains: q, mode: "insensitive" } } },
+            { client: { documentNumber: { contains: q } } },
           ],
         }
       : {}),

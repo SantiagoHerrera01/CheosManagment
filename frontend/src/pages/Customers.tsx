@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Search,
   Plus,
@@ -8,44 +8,19 @@ import {
   Phone,
   MapPin,
   CreditCard,
-  FileText,
-  Globe,
-  Landmark,
   UserRound,
   Loader2,
 } from "lucide-react";
 
 import { api, ApiError, qs } from "../lib/api";
-import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
-import type { Client, DocumentType, Paginated } from "../types/api";
+import ClientFormModal from "../components/clients/ClientFormModal";
+import type { Client, Paginated } from "../types/api";
 
-type CustomerForm = {
-  name: string;
-  documentType: DocumentType;
-  document: string;
-  phone: string;
-  city: string;
-  address: string;
-  email: string;
-  creditLimit: string;
-};
-
-const emptyForm: CustomerForm = {
-  name: "",
-  documentType: "CC",
-  document: "",
-  phone: "",
-  city: "",
-  address: "",
-  email: "",
-  creditLimit: "0",
-};
-
-const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
-  CC: "CÃ©dula",
+const DOCUMENT_TYPE_LABELS: Record<Client["documentType"], string> = {
+  CC: "Cédula",
   NIT: "NIT",
-  CE: "CÃ©dula extranjera",
+  CE: "Cédula extranjera",
   PASSPORT: "Pasaporte",
 };
 
@@ -67,21 +42,18 @@ export default function Customers() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Client | null>(null);
-  const [form, setForm] = useState<CustomerForm>(emptyForm);
-  const [errors, setErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
-  const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [deleteCustomer, setDeleteCustomer] = useState<Client | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  /** Trae la lista segÃºn el filtro actual (bÃºsqueda en el servidor). */
+  /** Trae la lista según el filtro actual (búsqueda en el servidor). */
   const loadCustomers = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const all: Client[] = [];
-      // El backend limita a 100 por pÃ¡gina: recorremos todas las pÃ¡ginas.
+      // El backend limita a 100 por página: recorremos todas las páginas.
       for (let page = 1; ; page += 1) {
         const result = await api.get<Paginated<Client>>(
           `/clients${qs({
@@ -104,7 +76,7 @@ export default function Customers() {
     }
   }, [search, showInactive]);
 
-  // Debounce de la bÃºsqueda: evita una peticiÃ³n por tecla.
+  // Debounce de la búsqueda: evita una petición por tecla.
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadCustomers();
@@ -118,25 +90,12 @@ export default function Customers() {
 
   const openCreateModal = () => {
     setEditingCustomer(null);
-    setForm(emptyForm);
-    setErrors({});
     setFormError(null);
     setIsModalOpen(true);
   };
 
   const openEditModal = (customer: Client) => {
     setEditingCustomer(customer);
-    setForm({
-      name: customer.fullName,
-      documentType: customer.documentType,
-      document: customer.documentNumber,
-      phone: customer.phone ?? "",
-      city: customer.city ?? "",
-      address: customer.address ?? "",
-      email: customer.email ?? "",
-      creditLimit: String(customer.creditLimit),
-    });
-    setErrors({});
     setFormError(null);
     setIsModalOpen(true);
   };
@@ -144,72 +103,13 @@ export default function Customers() {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingCustomer(null);
-    setForm(emptyForm);
-    setErrors({});
     setFormError(null);
   };
 
-  const updateField = (field: keyof CustomerForm, value: string) => {
-    setForm((previous) => ({ ...previous, [field]: value }));
-    if (errors[field]) {
-      setErrors((previous) => ({ ...previous, [field]: undefined }));
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors: Partial<Record<keyof CustomerForm, string>> = {};
-
-    if (!form.name.trim()) newErrors.name = "El nombre es obligatorio.";
-    if (!form.document.trim()) newErrors.document = "El documento es obligatorio.";
-    if (form.phone && !/^[0-9]{7,15}$/.test(form.phone)) {
-      newErrors.phone = "El telÃ©fono debe contener entre 7 y 15 nÃºmeros.";
-    }
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      newErrors.email = "Ingresa un correo vÃ¡lido.";
-    }
-
-    const creditLimit = Number(form.creditLimit);
-    if (Number.isNaN(creditLimit) || creditLimit < 0) {
-      newErrors.creditLimit = "El lÃ­mite de crÃ©dito no puede ser negativo.";
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSave = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!validateForm()) return;
-
-    setSaving(true);
-    setFormError(null);
-
-    const payload = {
-      documentType: form.documentType,
-      documentNumber: form.document.trim(),
-      fullName: form.name.trim(),
-      phone: form.phone.trim() || null,
-      email: form.email.trim() || null,
-      city: form.city.trim() || null,
-      address: form.address.trim() || null,
-      creditLimit: Number(form.creditLimit),
-    };
-
-    try {
-      if (editingCustomer) {
-        await api.patch(`/clients/${editingCustomer.id}`, payload);
-      } else {
-        await api.post("/clients", payload);
-      }
-      closeModal();
-      await loadCustomers();
-    } catch (error) {
-      setFormError(
-        error instanceof ApiError ? error.message : "No fue posible guardar el cliente."
-      );
-    } finally {
-      setSaving(false);
-    }
+  /** Tras crear/editar: cierra el modal y recarga la lista del servidor. */
+  const handleClientSaved = async () => {
+    closeModal();
+    await loadCustomers();
   };
 
   const confirmDelete = async () => {
@@ -218,7 +118,7 @@ export default function Customers() {
     setDeleting(true);
     setFormError(null);
     try {
-      // Baja lÃ³gica: el cliente conserva sus facturas e historial.
+      // Baja lógica: el cliente conserva sus facturas e historial.
       await api.patch(`/clients/${deleteCustomer.id}/active`, { isActive: false });
       setDeleteCustomer(null);
       await loadCustomers();
@@ -355,7 +255,7 @@ export default function Customers() {
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar por nombre, documento o telÃ©fono..."
+                placeholder="Buscar por nombre, documento o teléfono..."
                 className="
                   w-full
                   border
@@ -414,11 +314,11 @@ export default function Customers() {
                 </th>
 
                 <th className="text-left px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  UbicaciÃ³n
+                  Ubicación
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  CrÃ©dito
+                  Crédito
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
@@ -446,7 +346,7 @@ export default function Customers() {
                       className="mx-auto text-[#6F4E37] animate-spin"
                     />
                     <p className="mt-3 text-sm text-stone-500">
-                      Cargando clientesâ€¦
+                      Cargando clientes…
                     </p>
                   </td>
                 </tr>
@@ -460,7 +360,7 @@ export default function Customers() {
                     </p>
 
                     <p className="text-sm text-stone-500 mt-1">
-                      Intenta cambiar la bÃºsqueda.
+                      Intenta cambiar la búsqueda.
                     </p>
                   </td>
                 </tr>
@@ -510,7 +410,7 @@ export default function Customers() {
                         </div>
                       ) : (
                         <span className="text-sm text-stone-400">
-                          Sin telÃ©fono
+                          Sin teléfono
                         </span>
                       )}
 
@@ -522,7 +422,7 @@ export default function Customers() {
 
                     </td>
 
-                    {/* UBICACIÃ“N */}
+                    {/* UBICACIÓN */}
                     <td className="px-6 py-5">
 
                       <div className="flex items-center gap-2">
@@ -545,7 +445,7 @@ export default function Customers() {
 
                     </td>
 
-                    {/* CRÃ‰DITO */}
+                    {/* CRÉDITO */}
                     <td className="px-6 py-5 text-right">
 
                       <span className="text-sm text-stone-700">
@@ -649,336 +549,19 @@ export default function Customers() {
 
       {/* MODAL CREAR / EDITAR */}
       {isModalOpen && (
-        <Modal
-          icon={Users}
-          title={editingCustomer ? "Editar cliente" : "Nuevo cliente"}
-          subtitle={
-            editingCustomer
-              ? "Actualiza la informaciÃ³n del cliente."
-              : "Registra un nuevo cliente en Cheo Manager."
-          }
+        <ClientFormModal
+          client={editingCustomer}
           onClose={closeModal}
-          onSubmit={handleSave}
-          size="lg"
-          footer={
-            <div className="flex justify-end gap-3">
-
-              <button
-                type="button"
-                onClick={closeModal}
-                className="
-                  px-5
-                  py-3
-                  rounded-xl
-                  border
-                  border-stone-300
-                  text-stone-700
-                  font-medium
-                  hover:bg-stone-50
-                  transition
-                "
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="
-                  px-5
-                  py-3
-                  rounded-xl
-                  bg-[#6F4E37]
-                  hover:bg-[#5B3F2D]
-                  disabled:opacity-60
-                  text-white
-                  font-semibold
-                  transition
-                  inline-flex
-                  items-center
-                  gap-2
-                "
-              >
-                {saving && <Loader2 size={17} className="animate-spin" />}
-                {editingCustomer ? "Guardar cambios" : "Crear cliente"}
-              </button>
-
-            </div>
-          }
-        >
-
-            {/* FORMULARIO */}
-            <div className="space-y-5">
-
-              {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-                  {formError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-                {/* NOMBRE */}
-                <div className="md:col-span-2">
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Nombre completo / RazÃ³n social *
-                  </label>
-
-                  <input
-                    value={form.name}
-                    onChange={(event) => updateField("name", event.target.value)}
-                    placeholder="Ej. Juan PÃ©rez"
-                    className={`
-                      w-full
-                      border
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:ring-2
-                      focus:ring-[#6F4E37]/20
-                      ${
-                        errors.name
-                          ? "border-red-400"
-                          : "border-stone-300 focus:border-[#6F4E37]"
-                      }
-                    `}
-                  />
-
-                  {errors.name && (
-                    <p className="text-xs text-red-500 mt-1">{errors.name}</p>
-                  )}
-
-                </div>
-
-                {/* TIPO DE DOCUMENTO */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Tipo de documento *
-                  </label>
-
-                  <Select
-                    value={form.documentType}
-                    onChange={(value) =>
-                      updateField("documentType", value)
-                    }
-                    aria-label="Tipo de documento"
-                    options={[
-                      { value: "CC", label: "CÃ©dula", icon: CreditCard },
-                      { value: "NIT", label: "NIT", icon: Landmark },
-                      {
-                        value: "CE",
-                        label: "CÃ©dula extranjera",
-                        icon: Globe,
-                      },
-                      { value: "PASSPORT", label: "Pasaporte", icon: FileText },
-                    ]}
-                  />
-
-                </div>
-
-                {/* DOCUMENTO */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Documento *
-                  </label>
-
-                  <input
-                    value={form.document}
-                    onChange={(event) =>
-                      updateField("document", event.target.value.replace(/\D/g, ""))
-                    }
-                    placeholder="CÃ©dula o NIT"
-                    inputMode="numeric"
-                    className={`
-                      w-full
-                      border
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:ring-2
-                      focus:ring-[#6F4E37]/20
-                      ${
-                        errors.document
-                          ? "border-red-400"
-                          : "border-stone-300 focus:border-[#6F4E37]"
-                      }
-                    `}
-                  />
-
-                  {errors.document && (
-                    <p className="text-xs text-red-500 mt-1">{errors.document}</p>
-                  )}
-
-                </div>
-
-                {/* TELÃ‰FONO */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    TelÃ©fono
-                  </label>
-
-                  <input
-                    value={form.phone}
-                    onChange={(event) => updateField("phone", event.target.value.replace(/\D/g, ""))}
-                    placeholder="Ej. 3001234567"
-                    inputMode="numeric"
-                    className={`
-                      w-full
-                      border
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:ring-2
-                      focus:ring-[#6F4E37]/20
-                      ${
-                        errors.phone
-                          ? "border-red-400"
-                          : "border-stone-300 focus:border-[#6F4E37]"
-                      }
-                    `}
-                  />
-
-                  {errors.phone && (
-                    <p className="text-xs text-red-500 mt-1">{errors.phone}</p>
-                  )}
-
-                </div>
-
-                {/* CIUDAD */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Ciudad
-                  </label>
-
-                  <input
-                    value={form.city}
-                    onChange={(event) => updateField("city", event.target.value)}
-                    placeholder="Ej. MEDELLÃN"
-                    className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
-                  />
-
-                </div>
-
-                {/* DIRECCIÃ“N */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    DirecciÃ³n
-                  </label>
-
-                  <input
-                    value={form.address}
-                    onChange={(event) => updateField("address", event.target.value)}
-                    placeholder="Ej. Calle 10 # 20-30"
-                    className="w-full border border-stone-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#6F4E37]/20 focus:border-[#6F4E37]"
-                  />
-
-                </div>
-
-                {/* EMAIL */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    Correo electrÃ³nico
-                  </label>
-
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={(event) => updateField("email", event.target.value)}
-                    placeholder="correo@ejemplo.com"
-                    className={`
-                      w-full
-                      border
-                      rounded-xl
-                      px-4
-                      py-3
-                      outline-none
-                      focus:ring-2
-                      focus:ring-[#6F4E37]/20
-                      ${
-                        errors.email
-                          ? "border-red-400"
-                          : "border-stone-300 focus:border-[#6F4E37]"
-                      }
-                    `}
-                  />
-
-                  {errors.email && (
-                    <p className="text-xs text-red-500 mt-1">{errors.email}</p>
-                  )}
-
-                </div>
-
-                {/* LÃMITE DE CRÃ‰DITO */}
-                <div>
-
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
-                    LÃ­mite de crÃ©dito
-                  </label>
-
-                  <div className="relative">
-
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">
-                      $
-                    </span>
-
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.creditLimit}
-                      onChange={(event) => updateField("creditLimit", event.target.value)}
-                      className={`
-                        w-full
-                        border
-                        rounded-xl
-                        pl-9
-                        pr-4
-                        py-3
-                        outline-none
-                        focus:ring-2
-                        focus:ring-[#6F4E37]/20
-                        ${
-                          errors.creditLimit
-                            ? "border-red-400"
-                            : "border-stone-300 focus:border-[#6F4E37]"
-                        }
-                      `}
-                    />
-
-                  </div>
-
-                  {errors.creditLimit && (
-                    <p className="text-xs text-red-500 mt-1">{errors.creditLimit}</p>
-                  )}
-
-                  <p className="text-xs text-stone-400 mt-1">
-                    Define cuÃ¡nto puede deber el cliente.
-                  </p>
-
-                </div>
-
-              </div>
-
-            </div>
-
-        </Modal>
+          onSaved={handleClientSaved}
+        />
       )}
 
-      {/* CONFIRMACIÃ“N DE DESACTIVACIÃ“N */}
+      {/* CONFIRMACIÓN DE DESACTIVACIÓN */}
       {deleteCustomer && (
         <Modal
           icon={Trash2}
-          title="Â¿Desactivar cliente?"
-          subtitle="El cliente quedarÃ¡ inactivo para conservar su historial."
+          title="¿Desactivar cliente?"
+          subtitle="El cliente quedará inactivo para conservar su historial."
           onClose={() => setDeleteCustomer(null)}
           size="sm"
           footer={
@@ -1022,7 +605,7 @@ export default function Customers() {
                 "
               >
                 {deleting && <Loader2 size={17} className="animate-spin" />}
-                SÃ­, desactivar
+                Sí, desactivar
               </button>
 
             </div>
@@ -1032,11 +615,11 @@ export default function Customers() {
           <div className="space-y-4">
 
             <p className="text-sm text-stone-600 mt-3 leading-6">
-              EstÃ¡s a punto de desactivar a{" "}
+              Estás a punto de desactivar a{" "}
               <strong>{deleteCustomer.fullName}</strong>.
               <br />
-              El cliente no serÃ¡ borrado definitivamente;
-              quedarÃ¡ registrado como inactivo para conservar
+              El cliente no será borrado definitivamente;
+              quedará registrado como inactivo para conservar
               su historial.
             </p>
 
