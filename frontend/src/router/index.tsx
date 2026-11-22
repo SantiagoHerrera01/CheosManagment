@@ -21,8 +21,9 @@ import {
   Sales,
   Settings,
   Users,
+  Roles,
 } from "./pages";
-import RequireRole from "./RequireRole";
+import RequirePermission from "./RequirePermission";
 
 export const router = createBrowserRouter([
   {
@@ -154,11 +155,17 @@ export const router = createBrowserRouter([
       {
         path: "usuarios",
         element: (
-          <RequireRole roles={[]}>
+          <RequirePermission permission="users.manage">
             <LazyPage>
               <Users />
             </LazyPage>
-          </RequireRole>
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "roles",
+        element: (
+          <RequirePermission permission="roles.view"><LazyPage><Roles /></LazyPage></RequirePermission>
         ),
       },
     ],

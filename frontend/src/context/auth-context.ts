@@ -18,6 +18,7 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
   /** ADMIN siempre cumple; el resto solo si su rol está en la lista. */
   hasRole: (...roles: Role[]) => boolean;
+  hasPermission: (permission: string) => boolean;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

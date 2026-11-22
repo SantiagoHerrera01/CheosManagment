@@ -42,7 +42,7 @@ const TODAY = new Intl.DateTimeFormat("es-CO", {
 }).format(new Date());
 
 export default function MainLayout() {
-  const { user, logout, hasRole } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
@@ -234,7 +234,7 @@ export default function MainLayout() {
                 </p>
 
                 <p className="text-xs text-stone-500">
-                  {ROLE_LABELS[user.role]}
+                  {user.roleName ?? ROLE_LABELS[user.role] ?? user.role}
                 </p>
 
               </div>
@@ -277,7 +277,7 @@ export default function MainLayout() {
 
                     <span className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-semibold bg-[#6F4E37]/10 text-[#6F4E37] px-2 py-0.5 rounded-full">
                       <ShieldCheck size={12} />
-                      {ROLE_LABELS[user.role]}
+                      {user.roleName ?? ROLE_LABELS[user.role] ?? user.role}
                     </span>
 
                   </div>
@@ -286,7 +286,7 @@ export default function MainLayout() {
 
                 <div className="p-2">
 
-                  {hasRole() && (
+                  {hasPermission("users.manage") && (
                     <button
                       type="button"
                       onClick={() => {
@@ -298,6 +298,12 @@ export default function MainLayout() {
                     >
                       <UserCog size={16} className="text-stone-400" />
                       Usuarios
+                    </button>
+                  )}
+
+                  {user.permissions?.includes("*") && (
+                    <button type="button" onClick={() => { setMenuOpen(false); navigate("/roles"); }} role="menuitem" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-stone-700 hover:bg-stone-100 transition-colors">
+                      <ShieldCheck size={16} className="text-stone-400" /> Roles y permisos
                     </button>
                   )}
 

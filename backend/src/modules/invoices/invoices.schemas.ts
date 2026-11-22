@@ -6,7 +6,6 @@ export const paymentMethodSchema = z.enum([
   "EFECTIVO",
   "TRANSFERENCIA",
   "CONTRA_ENTREGA",
-  "CREDITO",
   "ABONO",
 ]);
 
@@ -35,18 +34,34 @@ export const createInvoiceSchema = z.object({
     .max(100),
   /** Descuento absoluto en pesos (no porcentaje). */
   discount: z.number().nonnegative().default(0),
-  paymentMethod: paymentMethodSchema.default("CREDITO"),
-  /** Abono inicial (solo tiene sentido con método ABONO o crédito parcial). */
+  /**
+   * Factura electrónica simulada (sin DIAN): aplica IVA 19% sobre
+   * (subtotal − descuento) y lo suma al total de la venta.
+   */
+  electronic: z.boolean().default(false),
+  paymentMethod: paymentMethodSchema.default("EFECTIVO"),
+  /** Abono inicial de una venta parcial. */
   initialPayment: z.number().positive().nullish(),
+  /**
+   * Cuenta (Efectivo o banco) donde entra el dinero de la venta.
+   * Obligatoria con TRANSFERENCIA; con EFECTIVO/ABONO si no llega,
+   * el backend usa la cuenta "Efectivo" del sistema.
+   */
+  accountId: z.string().uuid().nullish(),
   notes: z.string().trim().max(1000).nullish(),
   issueDate: z.coerce.date().nullish(),
-  /** Días de crédito; por defecto 30 (R1/R2). */
+  /** Días de vencimiento de la cartera; por defecto 30. */
   creditDays: z.number().int().min(0).max(365).default(30),
 });
 
 export const createPaymentSchema = z.object({
   amount: z.number().positive("El abono debe ser mayor que cero."),
   method: paymentMethodSchema.default("ABONO"),
+  /**
+   * Cuenta (Efectivo o banco) donde entra el abono. El frontend obliga
+   * a elegirla; si no llega, el backend usa la cuenta "Efectivo".
+   */
+  accountId: z.string().uuid().nullish(),
   paidAt: z.coerce.date().nullish(),
   notes: z.string().trim().max(500).nullish(),
 });

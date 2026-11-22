@@ -32,6 +32,15 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-CO");
 }
 
+/** Distribuye descuento e IVA entre las líneas de una factura electrónica. */
+function messageItemTotal(invoice: Invoice, item: NonNullable<Invoice["items"]>[number]) {
+  if (!invoice.electronic || invoice.subtotal <= 0) return item.subtotal;
+
+  const taxableBase = Math.max(invoice.subtotal - invoice.discount, 0);
+  const itemShare = item.subtotal / invoice.subtotal;
+  return Math.round(itemShare * (taxableBase + invoice.ivaAmount));
+}
+
 /** Normaliza un celular colombiano para wa.me (solo dígitos + 57). */
 export function whatsappPhone(phone: string): string {
   let digits = phone.replace(/\D/g, "");
@@ -104,7 +113,7 @@ export function saleMessage(invoice: Invoice): string {
     for (const item of invoice.items) {
       lines.push(
         `• ${item.quantity}x ${item.productName} (${item.presentationLabel}) — ${formatCurrency(
-          item.subtotal
+          messageItemTotal(invoice, item)
         )}`
       );
     }

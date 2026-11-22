@@ -87,6 +87,9 @@ export default function SalesTable({
   const [payAmount, setPayAmount] =
     useState("");
 
+  const [payFullDebt, setPayFullDebt] =
+    useState(false);
+
   const [payMethod, setPayMethod] =
     useState<PayMethod>("ABONO");
 
@@ -136,6 +139,7 @@ export default function SalesTable({
   const handleOpenPay = (invoice: Invoice) => {
     setPayingInvoice(invoice);
     setPayAmount("");
+    setPayFullDebt(false);
     setPayMethod("ABONO");
     setPayNotes("");
     setPayError(null);
@@ -410,6 +414,15 @@ export default function SalesTable({
                         <span className="font-semibold text-stone-800">
                           #{invoice.number}
                         </span>
+
+                        {invoice.electronic && (
+                          <span
+                            title="Factura electrónica (IVA 19% incluido)"
+                            className="rounded-full bg-[#F3EDE7] px-2 py-0.5 text-[11px] font-semibold text-[#6F4E37]"
+                          >
+                            Electrónica
+                          </span>
+                        )}
 
                       </div>
 
@@ -814,6 +827,22 @@ export default function SalesTable({
                 />
 
               </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={payFullDebt}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setPayFullDebt(checked);
+                    setPayAmount(checked ? String(payingInvoice.balance) : "");
+                  }}
+                  className="h-4 w-4 accent-[#6F4E37]"
+                />
+                <span className="text-sm font-medium text-stone-700">
+                  Pagar deuda completa
+                </span>
+              </label>
 
               {/* MÉTODO */}
 

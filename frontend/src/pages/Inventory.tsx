@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Package,
@@ -24,10 +24,12 @@ import Modal from "../components/ui/Modal";
 import MoneyInput from "../components/ui/MoneyInput";
 import Select from "../components/ui/Select";
 import type {
+  Grind,
   InventoryMovement,
   MovementReason,
   Paginated,
   Product,
+  ProductCategory,
 } from "../types/api";
 
 type InventoryItem = {
@@ -40,6 +42,8 @@ type InventoryItem = {
   type: "Molido" | "Grano";
   cost?: number;
   price: number;
+  /** Precio al por mayor (opcional): null cuando solo se vende al detal. */
+  wholesalePrice: number | null;
   stock: number;
   minimumStock: number;
   active: boolean;
@@ -139,6 +143,35 @@ export default function Inventory() {
   const [saveError, setSaveError] =
     useState<string | null>(null);
 
+  // Autocomplete de producto en el modal de Entrada: buscar uno existente
+  // o crear uno nuevo sin salir de aquí (solo admin puede crear).
+  const [productQuery, setProductQuery] =
+    useState("");
+
+  const [openList, setOpenList] = useState(false);
+
+  const [newProductMode, setNewProductMode] =
+    useState(false);
+
+  const [newProduct, setNewProduct] = useState({
+    name: "",
+    label: "",
+    grind: "GRANO" as Grind,
+    category: "TERMINADO" as ProductCategory,
+    price: "",
+    wholesalePrice: "",
+    cost: "",
+    minimumStock: "",
+  });
+
+  /** Autocomplete de presentación (250 g, 1 kg…) con opción de alta nueva. */
+  const [openPresList, setOpenPresList] = useState(false);
+
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const presWrapRef = useRef<HTMLDivElement | null>(null);
+  const presListRef = useRef<HTMLDivElement | null>(null);
+
   const [showMovements, setShowMovements] =
     useState(false);
 
@@ -147,6 +180,12 @@ export default function Inventory() {
     useState(false);
 
   const [costValue, setCostValue] =
+    useState("");
+
+  const [priceValue, setPriceValue] =
+    useState("");
+
+  const [wholesaleValue, setWholesaleValue] =
     useState("");
 
   const [costSaving, setCostSaving] =
@@ -199,6 +238,7 @@ export default function Inventory() {
               : "Grano",
           cost: presentation.cost,
           price: presentation.price,
+          wholesalePrice: presentation.wholesalePrice ?? null,
           stock: presentation.stock,
           minimumStock: presentation.minimumStock,
           active: presentation.isActive,
@@ -372,6 +412,22 @@ export default function Inventory() {
 
   const openMovementModal = (item?: InventoryItem) => {
     setSelectedKey(item?.presentationId ?? "");
+    setProductQuery(
+      item ? `${item.product} · ${item.presentation}` : ""
+    );
+    setOpenList(false);
+    setNewProductMode(false);
+    setOpenPresList(false);
+    setNewProduct({
+      name: "",
+      label: "",
+      grind: "GRANO",
+      category: "TERMINADO",
+      price: "",
+      wholesalePrice: "",
+      cost: "",
+      minimumStock: "",
+    });
     setQuantity("");
     setReason("PRODUCCION");
     setNotes("");
@@ -382,21 +438,208 @@ export default function Inventory() {
   const closeMovementModal = () => {
     setIsMovementModalOpen(false);
     setSelectedKey("");
+    setProductQuery("");
+    setOpenList(false);
+    setNewProductMode(false);
+    setOpenPresList(false);
     setQuantity("");
     setReason("PRODUCCION");
     setNotes("");
     setSaveError(null);
   };
 
-  const handleMovement = async () => {
-    if (!selectedItem) {
-      return;
+  /** Opciones del autocomplete: coincide por producto, presentación o tipo.
+   *  Se ignoran los "·" del texto precargado y cada token debe estar presente
+   *  ("Café Castillo · 250 g" sigue filtrando bien al reabrir la lista). */
+  const productOptions = useMemo(() => {
+    const tokens = productQuery
+      .trim()
+      .toLowerCase()
+      .split(/[\s·]+/)
+      .filter(Boolean);
+
+    return inventory.filter((item) => {
+      if (!item.active) return false;
+      if (tokens.length === 0) return true;
+
+      const haystack = `${item.product} ${item.presentation} ${item.type}`.toLowerCase();
+      return tokens.every((token) => haystack.includes(token));
+    });
+  }, [inventory, productQuery]);
+
+  /** Elige una opción existente del autocomplete. */
+  const pickProduct = (item: InventoryItem) => {
+    setSelectedKey(item.presentationId);
+    setProductQuery(`${item.product} · ${item.presentation}`);
+    setOpenList(false);
+    setNewProductMode(false);
+  };
+
+  /** Presentaciones ya usadas en el catálogo (para el autocomplete). */
+  const presentationSuggestions = useMemo(() => {
+    const query = newProduct.label.trim().toLowerCase();
+
+    const unique = Array.from(
+      new Set(
+        inventory
+          .filter((item) => item.active)
+          .map((item) => item.presentation)
+      )
+    ).sort((a, b) => a.localeCompare(b, "es"));
+
+    if (!query) return unique;
+
+    return unique.filter((label) =>
+      label.toLowerCase().includes(query)
+    );
+  }, [inventory, newProduct.label]);
+
+  /** Pasa al modo "producto nuevo" con el texto escrito como nombre. */
+  const startNewProduct = () => {
+    const typed = productQuery.trim();
+    setNewProductMode(true);
+    setSelectedKey("");
+    setOpenList(false);
+    setOpenPresList(false);
+    setNewProduct((prev) => ({
+      ...prev,
+      name: typed && !typed.includes(" · ") ? typed : prev.name,
+    }));
+  };
+
+  // Clic fuera de los buscadores → se pliegan las listas.
+  useEffect(() => {
+    if (!openList && !openPresList) return;
+
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        !searchWrapRef.current?.contains(target) &&
+        !listRef.current?.contains(target) &&
+        !presWrapRef.current?.contains(target) &&
+        !presListRef.current?.contains(target)
+      ) {
+        setOpenList(false);
+        setOpenPresList(false);
+      }
     }
 
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [openList, openPresList]);
+
+  const handleMovement = async () => {
     const numericQuantity = Number(quantity);
 
     if (!Number.isInteger(numericQuantity) || numericQuantity <= 0) {
       setSaveError("La cantidad debe ser un número entero mayor que cero.");
+      return;
+    }
+
+    // -------------------------------------------------------
+    //  MODO PRODUCTO NUEVO: validar → crear → ingresar stock
+    // -------------------------------------------------------
+    if (newProductMode) {
+      const name = newProduct.name.trim();
+      const label = newProduct.label.trim();
+      const price = Number(newProduct.price);
+      const wholesaleRaw = newProduct.wholesalePrice.trim();
+      const wholesale = wholesaleRaw === "" ? null : Number(wholesaleRaw);
+      const cost = newProduct.cost.trim() === "" ? 0 : Number(newProduct.cost);
+      const minimumStock =
+        newProduct.minimumStock.trim() === ""
+          ? 0
+          : Number(newProduct.minimumStock);
+
+      if (name.length < 2) {
+        setSaveError("El nombre del producto debe tener al menos 2 letras.");
+        return;
+      }
+      if (label.length < 1 || label.length > 30) {
+        setSaveError("Indica la presentación (ej. 250 g), máximo 30 caracteres.");
+        return;
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        setSaveError("El precio al detal debe ser mayor que cero.");
+        return;
+      }
+      if (
+        wholesale !== null &&
+        (!Number.isFinite(wholesale) || wholesale <= 0)
+      ) {
+        setSaveError("El precio al por mayor debe ser mayor que cero (o déjalo vacío).");
+        return;
+      }
+      if (wholesale !== null && wholesale >= price) {
+        setSaveError("El precio al por mayor debe ser menor que el precio al detal.");
+        return;
+      }
+      if (!Number.isFinite(cost) || cost < 0) {
+        setSaveError("El costo debe ser un número mayor o igual a cero.");
+        return;
+      }
+      if (!Number.isInteger(minimumStock) || minimumStock < 0) {
+        setSaveError("El stock mínimo debe ser un número entero mayor o igual a cero.");
+        return;
+      }
+
+      setSaving(true);
+      setSaveError(null);
+
+      try {
+        const created = await api.post<Product>("/products", {
+          name,
+          category: newProduct.category,
+          presentations: [
+            {
+              label,
+              grind: newProduct.grind,
+              price,
+              wholesalePrice: wholesale,
+              cost,
+              stock: 0,
+              minimumStock,
+            },
+          ],
+        });
+
+        const presentation =
+          created.presentations.find((p) => p.label === label) ??
+          created.presentations[0];
+
+        await api.post(
+          `/products/${created.id}/presentations/${presentation.id}/stock`,
+          {
+            quantity: numericQuantity,
+            reason,
+            notes: notes.trim() || null,
+          }
+        );
+
+        closeMovementModal();
+        await loadInventory();
+
+        if (movementsLoaded) {
+          await loadMovements();
+        }
+      } catch (error) {
+        setSaveError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible crear el producto y registrar la entrada."
+        );
+      } finally {
+        setSaving(false);
+      }
+
+      return;
+    }
+
+    // -------------------------------------------------------
+    //  MODO PRODUCTO EXISTENTE
+    // -------------------------------------------------------
+    if (!selectedItem) {
+      setSaveError("Selecciona un producto o crea uno nuevo.");
       return;
     }
 
@@ -433,13 +676,19 @@ export default function Inventory() {
   };
 
   // ---------------------------------------------------------
-  //  Actualizar costo desde Inventario (P0-2 / P1-5)
+  //  Actualizar costo y precios desde Inventario (P0-2 / P1-5)
   //  Usa el PATCH /products/:id/presentations/:presentationId (solo admin).
   // ---------------------------------------------------------
   const openCostModal = (item: InventoryItem) => {
     setSelectedKey(item.presentationId);
     setCostValue(
       item.cost !== undefined ? String(item.cost) : ""
+    );
+    setPriceValue(String(item.price));
+    setWholesaleValue(
+      item.wholesalePrice !== null
+        ? String(item.wholesalePrice)
+        : ""
     );
     setCostError(null);
     setIsCostModalOpen(true);
@@ -449,6 +698,8 @@ export default function Inventory() {
     setIsCostModalOpen(false);
     setSelectedKey("");
     setCostValue("");
+    setPriceValue("");
+    setWholesaleValue("");
     setCostError(null);
   };
 
@@ -458,10 +709,40 @@ export default function Inventory() {
     }
 
     const numericCost = Number(costValue);
+    const numericPrice = Number(priceValue);
+    const wholesaleRaw = wholesaleValue.trim();
+    const numericWholesale = wholesaleRaw === "" ? null : Number(wholesaleRaw);
 
     if (!Number.isFinite(numericCost) || numericCost < 0) {
       setCostError(
         "El costo debe ser un número mayor o igual a cero."
+      );
+      return;
+    }
+
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      setCostError(
+        "El precio al detal debe ser mayor que cero."
+      );
+      return;
+    }
+
+    if (
+      numericWholesale !== null &&
+      (!Number.isFinite(numericWholesale) || numericWholesale <= 0)
+    ) {
+      setCostError(
+        "El precio al por mayor debe ser mayor que cero (o déjalo vacío)."
+      );
+      return;
+    }
+
+    if (
+      numericWholesale !== null &&
+      numericWholesale >= numericPrice
+    ) {
+      setCostError(
+        "El precio al por mayor debe ser menor que el precio al detal."
       );
       return;
     }
@@ -472,7 +753,12 @@ export default function Inventory() {
     try {
       await api.patch(
         `/products/${selectedItem.productId}/presentations/${selectedItem.presentationId}`,
-        { cost: numericCost }
+        {
+          cost: numericCost,
+          price: numericPrice,
+          // null elimina el precio de mayoreo (lo deja solo al detal).
+          wholesalePrice: numericWholesale,
+        }
       );
 
       closeCostModal();
@@ -481,7 +767,7 @@ export default function Inventory() {
       setCostError(
         error instanceof ApiError
           ? error.message
-          : "No fue posible actualizar el costo."
+          : "No fue posible actualizar los precios."
       );
     } finally {
       setCostSaving(false);
@@ -831,7 +1117,7 @@ export default function Inventory() {
         {/* TABLA */}
         <div className="overflow-x-auto">
 
-          <table className="w-full min-w-[1100px]">
+          <table className="w-full min-w-[1250px]">
 
             <thead>
               <tr className="bg-stone-50 border-b border-stone-200">
@@ -853,7 +1139,11 @@ export default function Inventory() {
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
-                  Precio
+                  Precio detal
+                </th>
+
+                <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
+                  Precio mayoreo
                 </th>
 
                 <th className="text-right px-6 py-4 text-xs font-semibold text-stone-500 uppercase">
@@ -877,7 +1167,7 @@ export default function Inventory() {
                 <tr>
 
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-6 py-16 text-center"
                   >
                     <Loader2
@@ -895,7 +1185,7 @@ export default function Inventory() {
                 <tr>
 
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-6 py-16 text-center"
                   >
 
@@ -1009,7 +1299,7 @@ export default function Inventory() {
 
                       </td>
 
-                      {/* PRECIO */}
+                      {/* PRECIO DETAL */}
                       <td className="px-6 py-5 text-right">
 
                         <span className="text-sm text-stone-700">
@@ -1017,6 +1307,23 @@ export default function Inventory() {
                             item.price
                           )}
                         </span>
+
+                      </td>
+
+                      {/* PRECIO MAYOREO */}
+                      <td className="px-6 py-5 text-right">
+
+                        {item.wholesalePrice !== null ? (
+                          <span className="text-sm text-stone-700">
+                            {formatCurrency(
+                              item.wholesalePrice
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-stone-400">
+                            —
+                          </span>
+                        )}
 
                       </td>
 
@@ -1068,7 +1375,7 @@ export default function Inventory() {
                                   item
                                 )
                               }
-                              title="Actualizar costo"
+                              title="Actualizar costo y precios"
                               className="
                                 w-9
                                 h-9
@@ -1338,7 +1645,7 @@ export default function Inventory() {
         <Modal
           icon={ArrowDownToLine}
           title="Registrar entrada"
-          subtitle="Actualiza las existencias del producto."
+          subtitle="Busca un producto existente o créalo nuevo."
           onClose={closeMovementModal}
           size="md"
           footer={
@@ -1368,7 +1675,12 @@ export default function Inventory() {
                 type="button"
                 onClick={() => void handleMovement()}
                 disabled={
-                  !selectedItem ||
+                  (!newProductMode && !selectedItem) ||
+                  (newProductMode &&
+                    (newProduct.name.trim().length < 2 ||
+                      newProduct.label.trim().length < 1 ||
+                      newProduct.price.trim() === "" ||
+                      Number(newProduct.price) <= 0)) ||
                   !Number.isInteger(Number(quantity)) ||
                   Number(quantity) <= 0 ||
                   saving
@@ -1413,33 +1725,515 @@ export default function Inventory() {
               </div>
             )}
 
-            {/* PRODUCTO */}
+            {/* PRODUCTO (autocomplete o producto nuevo) */}
             <div>
 
-              <label className="block text-sm font-medium text-stone-700 mb-2">
-                Producto
-              </label>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <label className="block text-sm font-medium text-stone-700">
+                  Producto
+                </label>
 
-              <Select
-                value={selectedKey}
-                onChange={(value) =>
-                  setSelectedKey(
-                    value
-                  )
-                }
-                placeholder="Selecciona un producto"
-                aria-label="Producto"
-                options={inventory.map((item) => ({
-                  value: item.presentationId,
-                  label: `${item.product} · ${item.presentation} · ${item.type} (${item.stock} und)`,
-                  icon: Package,
-                }))}
-              />
+                {hasRole("ADMIN") && !newProductMode && (
+                  <button
+                    type="button"
+                    onClick={startNewProduct}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#6F4E37] hover:text-[#5A3E2B]"
+                  >
+                    <Plus size={15} />
+                    Crear producto
+                  </button>
+                )}
+              </div>
+
+              {!newProductMode ? (
+                <div ref={searchWrapRef} className="relative">
+
+                  <input
+                    type="text"
+                    role="combobox"
+                    aria-expanded={openList}
+                    aria-controls="entry-product-list"
+                    autoComplete="off"
+                    value={productQuery}
+                    onChange={(event) => {
+                      setProductQuery(event.target.value);
+                      setSelectedKey("");
+                      setOpenList(true);
+                    }}
+                    onFocus={() => setOpenList(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setOpenList(false);
+                      }
+                      if (event.key === "Enter" && openList && productOptions[0]) {
+                        event.preventDefault();
+                        pickProduct(productOptions[0]);
+                      }
+                    }}
+                    placeholder="Escribe para buscar un producto…"
+                    className="
+                      w-full
+                      border
+                      border-stone-300
+                      rounded-xl
+                      px-4
+                      py-3
+                      outline-none
+                      focus:border-[#6F4E37]
+                      focus:ring-2
+                      focus:ring-[#6F4E37]/20
+                    "
+                  />
+
+                  {openList && (
+                    <div
+                      id="entry-product-list"
+                      ref={listRef}
+                      className="
+                        absolute
+                        z-20
+                        mt-1
+                        w-full
+                        max-h-56
+                        overflow-y-auto
+                        rounded-xl
+                        border
+                        border-stone-200
+                        bg-white
+                        shadow-lg
+                        py-1
+                      "
+                    >
+                      {productOptions.slice(0, 30).map((item) => (
+                        <button
+                          key={item.presentationId}
+                          type="button"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            pickProduct(item);
+                          }}
+                          className="
+                            w-full
+                            text-left
+                            px-4
+                            py-2.5
+                            text-sm
+                            hover:bg-stone-50
+                            flex
+                            items-center
+                            justify-between
+                            gap-3
+                          "
+                        >
+                          <span className="min-w-0">
+                            <span className="font-medium text-stone-800 block truncate">
+                              {item.product}
+                            </span>
+                            <span className="text-xs text-stone-500">
+                              {item.presentation} · {item.type}
+                            </span>
+                          </span>
+
+                          <span className="text-xs text-stone-400 shrink-0">
+                            {item.stock} und
+                          </span>
+                        </button>
+                      ))}
+
+                      {productOptions.length === 0 && (
+                        <p className="px-4 py-3 text-sm text-stone-500">
+                          Sin resultados para “{productQuery.trim()}”.
+                        </p>
+                      )}
+
+                    </div>
+                  )}
+
+                </div>
+              ) : (
+
+                <div className="space-y-4 rounded-xl bg-stone-50 border border-stone-200 p-4">
+
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-stone-700">
+                      Nuevo producto
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewProductMode(false);
+                        setProductQuery("");
+                        setOpenPresList(false);
+                        setNewProduct({
+                          name: "",
+                          label: "",
+                          grind: "GRANO",
+                          category: "TERMINADO",
+                          price: "",
+                          wholesalePrice: "",
+                          cost: "",
+                          minimumStock: "",
+                        });
+                      }}
+                      className="text-xs font-semibold text-[#6F4E37] hover:text-[#5A3E2B]"
+                    >
+                      Volver a buscar
+                    </button>
+                  </div>
+
+                  {/* NOMBRE */}
+                  <div>
+                    <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                      Nombre *
+                    </label>
+
+                    <input
+                      type="text"
+                      value={newProduct.name}
+                      onChange={(event) =>
+                        setNewProduct({ ...newProduct, name: event.target.value })
+                      }
+                      placeholder="Ej. Café Castillo"
+                      className="
+                        w-full
+                        border
+                        border-stone-300
+                        rounded-xl
+                        px-4
+                        py-2.5
+                        text-sm
+                        outline-none
+                        bg-white
+                        focus:border-[#6F4E37]
+                        focus:ring-2
+                        focus:ring-[#6F4E37]/20
+                      "
+                    />
+                  </div>
+
+                  {/* TIPO + CATEGORÍA */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Tipo
+                      </label>
+
+                      <Select
+                        value={newProduct.grind}
+                        onChange={(value) =>
+                          setNewProduct({
+                            ...newProduct,
+                            grind: value as Grind,
+                          })
+                        }
+                        aria-label="Tipo"
+                        options={[
+                          { value: "GRANO", label: "Grano", icon: Boxes },
+                          { value: "MOLIDO", label: "Molido", icon: Package },
+                        ]}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Categoría
+                      </label>
+
+                      <Select
+                        value={newProduct.category}
+                        onChange={(value) =>
+                          setNewProduct({
+                            ...newProduct,
+                            category: value as ProductCategory,
+                          })
+                        }
+                        aria-label="Categoría"
+                        options={[
+                          { value: "TERMINADO", label: "Para venta", icon: Package },
+                          { value: "MATERIA_PRIMA", label: "Materia prima", icon: Layers },
+                          { value: "INSUMO", label: "Insumo / empaque", icon: Boxes },
+                        ]}
+                      />
+                    </div>
+                  </div>
+
+                  {/* PRESENTACIÓN (autocomplete + alta nueva) */}
+                  <div ref={presWrapRef} className="relative">
+
+                    <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                      Presentación *
+                    </label>
+
+                    <input
+                      type="text"
+                      role="combobox"
+                      aria-expanded={openPresList}
+                      aria-controls="entry-pres-list"
+                      autoComplete="off"
+                      value={newProduct.label}
+                      onChange={(event) => {
+                        setNewProduct({
+                          ...newProduct,
+                          label: event.target.value,
+                        });
+                        setOpenPresList(true);
+                      }}
+                      onFocus={() => setOpenPresList(true)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setOpenPresList(false);
+                        }
+                        if (
+                          event.key === "Enter" &&
+                          openPresList &&
+                          presentationSuggestions[0]
+                        ) {
+                          event.preventDefault();
+                          setNewProduct({
+                            ...newProduct,
+                            label: presentationSuggestions[0],
+                          });
+                          setOpenPresList(false);
+                        }
+                      }}
+                      placeholder="Ej. 250 g, 1 kg, 500 g…"
+                      className="
+                        w-full
+                        border
+                        border-stone-300
+                        rounded-xl
+                        px-4
+                        py-2.5
+                        text-sm
+                        outline-none
+                        bg-white
+                        focus:border-[#6F4E37]
+                        focus:ring-2
+                        focus:ring-[#6F4E37]/20
+                      "
+                    />
+
+                    {openPresList && (
+                      <div
+                        id="entry-pres-list"
+                        ref={presListRef}
+                        className="
+                          absolute
+                          z-20
+                          mt-1
+                          w-full
+                          max-h-44
+                          overflow-y-auto
+                          rounded-xl
+                          border
+                          border-stone-200
+                          bg-white
+                          shadow-lg
+                          py-1
+                        "
+                      >
+                        {presentationSuggestions.map((label) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              setNewProduct({ ...newProduct, label });
+                              setOpenPresList(false);
+                            }}
+                            className="
+                              w-full
+                              text-left
+                              px-4
+                              py-2
+                              text-sm
+                              text-stone-700
+                              hover:bg-stone-50
+                            "
+                          >
+                            {label}
+                          </button>
+                        ))}
+
+                        {presentationSuggestions.length === 0 && (
+                          <p className="px-4 py-2.5 text-sm text-stone-500">
+                            Sin coincidencias.
+                          </p>
+                        )}
+
+                        {newProduct.label.trim().length >= 1 && (
+                          <button
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              setOpenPresList(false);
+                            }}
+                            className="
+                              w-full
+                              text-left
+                              px-4
+                              py-2.5
+                              text-sm
+                              font-semibold
+                              text-[#6F4E37]
+                              hover:bg-[#F3EDE7]
+                              border-t
+                              border-stone-100
+                              flex
+                              items-center
+                              gap-2
+                            "
+                          >
+                            <Plus size={15} />
+                            Usar presentación “{newProduct.label.trim()}”
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-stone-400 mt-1.5">
+                      Elige una existente o escribe una nueva.
+                    </p>
+
+                  </div>
+
+                  {/* PRECIOS */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Precio al detal *
+                      </label>
+
+                      <MoneyInput
+                        value={newProduct.price}
+                        onChange={(raw) =>
+                          setNewProduct({ ...newProduct, price: raw })
+                        }
+                        placeholder="0"
+                        className="
+                          w-full
+                          border
+                          border-stone-300
+                          rounded-xl
+                          px-4
+                          py-2.5
+                          text-sm
+                          outline-none
+                          bg-white
+                          focus:border-[#6F4E37]
+                          focus:ring-2
+                          focus:ring-[#6F4E37]/20
+                        "
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Precio al por mayor
+                      </label>
+
+                      <MoneyInput
+                        value={newProduct.wholesalePrice}
+                        onChange={(raw) =>
+                          setNewProduct({ ...newProduct, wholesalePrice: raw })
+                        }
+                        placeholder="Opcional"
+                        className="
+                          w-full
+                          border
+                          border-stone-300
+                          rounded-xl
+                          px-4
+                          py-2.5
+                          text-sm
+                          outline-none
+                          bg-white
+                          focus:border-[#6F4E37]
+                          focus:ring-2
+                          focus:ring-[#6F4E37]/20
+                        "
+                      />
+                    </div>
+                  </div>
+
+                  {/* COSTO + STOCK MÍNIMO */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Costo
+                      </label>
+
+                      <MoneyInput
+                        value={newProduct.cost}
+                        onChange={(raw) =>
+                          setNewProduct({ ...newProduct, cost: raw })
+                        }
+                        placeholder="0"
+                        className="
+                          w-full
+                          border
+                          border-stone-300
+                          rounded-xl
+                          px-4
+                          py-2.5
+                          text-sm
+                          outline-none
+                          bg-white
+                          focus:border-[#6F4E37]
+                          focus:ring-2
+                          focus:ring-[#6F4E37]/20
+                        "
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-600 mb-1.5">
+                        Stock mínimo
+                      </label>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={newProduct.minimumStock}
+                        onChange={(event) =>
+                          setNewProduct({
+                            ...newProduct,
+                            minimumStock: event.target.value,
+                          })
+                        }
+                        placeholder="0"
+                        className="
+                          w-full
+                          border
+                          border-stone-300
+                          rounded-xl
+                          px-4
+                          py-2.5
+                          text-sm
+                          outline-none
+                          bg-white
+                          focus:border-[#6F4E37]
+                          focus:ring-2
+                          focus:ring-[#6F4E37]/20
+                        "
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-stone-400">
+                    El stock se suma con la cantidad de esta entrada.
+                  </p>
+
+                </div>
+
+              )}
 
             </div>
 
-            {/* STOCK ACTUAL */}
-            {selectedItem && (
+            {/* STOCK ACTUAL (solo producto existente) */}
+            {selectedItem && !newProductMode && (
               <div className="rounded-xl bg-stone-50 border border-stone-200 p-4">
 
                 <div className="flex justify-between">
@@ -1568,8 +2362,8 @@ export default function Inventory() {
       {isCostModalOpen && (
         <Modal
           icon={CircleDollarSign}
-          title="Actualizar costo"
-          subtitle="Costo interno de la presentación seleccionada."
+          title="Costo y precios"
+          subtitle="Costo interno y precios de venta de la presentación."
           onClose={closeCostModal}
           size="md"
           footer={
@@ -1602,6 +2396,9 @@ export default function Inventory() {
                   costValue === "" ||
                   Number.isNaN(Number(costValue)) ||
                   Number(costValue) < 0 ||
+                  priceValue === "" ||
+                  Number.isNaN(Number(priceValue)) ||
+                  Number(priceValue) <= 0 ||
                   costSaving
                 }
                 className="
@@ -1628,7 +2425,7 @@ export default function Inventory() {
 
                 {costSaving
                   ? "Guardando…"
-                  : "Guardar costo"}
+                  : "Guardar cambios"}
               </button>
 
             </div>
@@ -1659,19 +2456,49 @@ export default function Inventory() {
               </div>
             )}
 
-            {/* COSTO ACTUAL */}
+            {/* COSTO / PRECIOS ACTUALES */}
             {selectedItem && (
-              <div className="flex justify-between text-sm">
+              <div className="rounded-xl bg-stone-50 border border-stone-200 p-4 space-y-2">
 
-                <span className="text-stone-500">
-                  Costo actual
-                </span>
+                <div className="flex justify-between text-sm">
 
-                <strong className="text-stone-800">
-                  {selectedItem.cost !== undefined
-                    ? formatCurrency(selectedItem.cost)
-                    : "No disponible"}
-                </strong>
+                  <span className="text-stone-500">
+                    Costo actual
+                  </span>
+
+                  <strong className="text-stone-800">
+                    {selectedItem.cost !== undefined
+                      ? formatCurrency(selectedItem.cost)
+                      : "No disponible"}
+                  </strong>
+
+                </div>
+
+                <div className="flex justify-between text-sm">
+
+                  <span className="text-stone-500">
+                    Precio detal actual
+                  </span>
+
+                  <strong className="text-stone-800">
+                    {formatCurrency(selectedItem.price)}
+                  </strong>
+
+                </div>
+
+                <div className="flex justify-between text-sm">
+
+                  <span className="text-stone-500">
+                    Precio mayoreo actual
+                  </span>
+
+                  <strong className="text-stone-800">
+                    {selectedItem.wholesalePrice !== null
+                      ? formatCurrency(selectedItem.wholesalePrice)
+                      : "Sin mayoreo"}
+                  </strong>
+
+                </div>
 
               </div>
             )}
@@ -1680,7 +2507,7 @@ export default function Inventory() {
             <div>
 
               <label className="block text-sm font-medium text-stone-700 mb-2">
-                Nuevo costo
+                Costo (interno)
               </label>
 
               <MoneyInput
@@ -1703,6 +2530,68 @@ export default function Inventory() {
 
               <p className="text-xs text-stone-400 mt-2">
                 Valor al que compraste la última vez. Se usa para la utilidad y el valor del inventario.
+              </p>
+
+            </div>
+
+            {/* PRECIO DETAL */}
+            <div>
+
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Precio al detal
+              </label>
+
+              <MoneyInput
+                value={priceValue}
+                onChange={setPriceValue}
+                placeholder="0"
+                className="
+                  w-full
+                  border
+                  border-stone-300
+                  rounded-xl
+                  px-4
+                  py-3
+                  outline-none
+                  focus:border-[#6F4E37]
+                  focus:ring-2
+                  focus:ring-[#6F4E37]/20
+                "
+              />
+
+              <p className="text-xs text-stone-400 mt-2">
+                Precio de venta por unidad a un cliente normal.
+              </p>
+
+            </div>
+
+            {/* PRECIO MAYOREO */}
+            <div>
+
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Precio al por mayor
+              </label>
+
+              <MoneyInput
+                value={wholesaleValue}
+                onChange={setWholesaleValue}
+                placeholder="Opcional"
+                className="
+                  w-full
+                  border
+                  border-stone-300
+                  rounded-xl
+                  px-4
+                  py-3
+                  outline-none
+                  focus:border-[#6F4E37]
+                  focus:ring-2
+                  focus:ring-[#6F4E37]/20
+                "
+              />
+
+              <p className="text-xs text-stone-400 mt-2">
+                Precio para clientes al por mayor. Déjalo vacío si no aplica (debe ser menor al detal).
               </p>
 
             </div>

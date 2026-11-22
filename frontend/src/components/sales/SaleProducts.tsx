@@ -102,6 +102,13 @@ export default function SaleProducts({
   const [openList, setOpenList] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
+  /**
+   * Modo de precio de la venta completa: "detal" o "wholesale" (P1-3).
+   * Al cambiar, TODAS las líneas del carrito se reajustan al precio
+   * correspondiente (las que no tengan precio de mayoreo quedan igual).
+   */
+  const [wholesaleMode, setWholesaleMode] = useState(false);
+
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -286,8 +293,11 @@ export default function SaleProducts({
           presentationLabel: `${option.label} · ${grindLabel(option.grind)}`,
           regularPrice: option.price,
           wholesalePrice: option.wholesalePrice,
-          wholesale: false,
-          price: option.price,
+          wholesale: wholesaleMode && option.wholesalePrice !== null,
+          price:
+            wholesaleMode && option.wholesalePrice !== null
+              ? option.wholesalePrice
+              : option.price,
           quantity: 1,
         },
       ]);
@@ -333,22 +343,18 @@ export default function SaleProducts({
     );
   };
 
-  /** Alterna entre precio regular y precio de mayoreo en una línea (P1-3). */
-  const toggleWholesale = (id: string) => {
+  /**
+   * Cambia el modo global detal / mayoreo y reprica TODAS las líneas
+   * del carrito. Las líneas sin precio de mayoreo conservan su precio.
+   */
+  const changeWholesaleMode = (wholesale: boolean) => {
+    setWholesaleMode(wholesale);
     onItemsChange(
-      items.map((item) => {
-        if (item.id !== id || item.wholesalePrice === null) {
-          return item;
-        }
-
-        const next = !item.wholesale;
-
-        return {
-          ...item,
-          wholesale: next,
-          price: next ? item.wholesalePrice : item.regularPrice,
-        };
-      })
+      items.map((item) =>
+        wholesale && item.wholesalePrice !== null
+          ? { ...item, wholesale: true, price: item.wholesalePrice }
+          : { ...item, wholesale: false, price: item.regularPrice }
+      )
     );
   };
 
@@ -372,6 +378,39 @@ export default function SaleProducts({
             <p className="text-sm text-stone-500">
               Agrega los productos de esta venta.
             </p>
+          </div>
+
+          {/* DETAL / AL POR MAYOR (global para toda la venta) */}
+          <div
+            role="group"
+            aria-label="Precio de la venta"
+            className="ml-auto flex items-center rounded-full border border-stone-200 bg-stone-100 p-1"
+          >
+            <button
+              type="button"
+              onClick={() => changeWholesaleMode(false)}
+              aria-pressed={!wholesaleMode}
+              className={
+                !wholesaleMode
+                  ? "rounded-full bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-semibold text-stone-900 shadow-sm transition"
+                  : "px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-stone-500 transition"
+              }
+            >
+              Detal
+            </button>
+
+            <button
+              type="button"
+              onClick={() => changeWholesaleMode(true)}
+              aria-pressed={wholesaleMode}
+              className={
+                wholesaleMode
+                  ? "rounded-full bg-[#6F4E37] px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition"
+                  : "px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-stone-500 transition"
+              }
+            >
+              Al por mayor
+            </button>
           </div>
 
         </div>
@@ -790,22 +829,30 @@ export default function SaleProducts({
                         {formatCurrency(item.price)} unidad
                       </p>
 
-                      {/* MAYOREO (P1-3) */}
+                      {/* Referencia de los dos precios (P1-3): el activo va
+                          resaltado según el modo global Detal / Al por mayor. */}
                       {item.wholesalePrice !== null && (
-                        <button
-                          type="button"
-                          onClick={() => toggleWholesale(item.id)}
-                          title="Alterna entre el precio regular y el precio de mayoreo"
-                          className={
-                            item.wholesale
-                              ? "mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-3 py-1 text-xs font-semibold hover:bg-emerald-200 transition"
-                              : "mt-2 inline-flex items-center gap-1 rounded-full bg-stone-100 text-stone-600 px-3 py-1 text-xs font-medium hover:bg-stone-200 transition"
-                          }
-                        >
-                          {item.wholesale
-                            ? `✓ Mayoreo ${formatCurrency(item.price)} — tocar para precio regular`
-                            : `Mayoreo ${formatCurrency(item.wholesalePrice)} — aplicar`}
-                        </button>
+                        <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <span
+                            className={
+                              !item.wholesale
+                                ? "rounded-full bg-[#F3EDE7] px-2.5 py-0.5 font-semibold text-[#6F4E37]"
+                                : "rounded-full px-2.5 py-0.5 text-stone-400"
+                            }
+                          >
+                            Detal {formatCurrency(item.regularPrice)}
+                          </span>
+
+                          <span
+                            className={
+                              item.wholesale
+                                ? "rounded-full bg-emerald-100 px-2.5 py-0.5 font-semibold text-emerald-700"
+                                : "rounded-full px-2.5 py-0.5 text-stone-400"
+                            }
+                          >
+                            Mayoreo {formatCurrency(item.wholesalePrice)}
+                          </span>
+                        </p>
                       )}
 
                     </div>

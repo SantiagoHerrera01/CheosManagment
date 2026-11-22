@@ -12,13 +12,15 @@ export const createUserSchema = z.object({
   email: z.string().trim().toLowerCase().min(5).max(254),
   fullName: z.string().trim().min(3).max(120),
   password: z.string().min(1).max(200),
-  role: roleSchema,
+  role: roleSchema.optional(),
+  roleId: z.string().uuid().optional(),
 });
 
 export const updateUserSchema = z
   .object({
     fullName: z.string().trim().min(3).max(120).optional(),
     role: roleSchema.optional(),
+    roleId: z.string().uuid().optional(),
     isActive: z.boolean().optional(),
   })
   .refine((data) => Object.values(data).some((v) => v !== undefined), {
@@ -28,6 +30,7 @@ export const updateUserSchema = z
 export const listUsersQuery = paginationQuery.extend({
   q: z.string().trim().max(100).optional(),
   role: roleSchema.optional(),
+  roleId: z.string().uuid().optional(),
   includeInactive: z.enum(["true", "false"]).default("false"),
 });
 

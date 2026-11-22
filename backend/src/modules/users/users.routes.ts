@@ -3,7 +3,8 @@ import { z } from "zod";
 
 import { Role } from "@prisma/client";
 
-import { authenticate, requireRole } from "../../shared/middleware/auth.js";
+import { authenticate } from "../../shared/middleware/auth.js";
+import { requirePermission } from "../../shared/middleware/permissions.js";
 import { validate } from "../../shared/middleware/validate.js";
 import * as usersService from "./users.service.js";
 import {
@@ -16,7 +17,7 @@ import {
 const router = Router();
 
 // Todas las rutas de usuarios requieren sesión + rol ADMIN
-router.use(authenticate, requireRole(Role.ADMIN));
+router.use(authenticate, requirePermission("users.manage"));
 
 const idParam = z.object({ id: z.string().uuid() });
 

@@ -28,6 +28,9 @@ export type InvoicePdfData = {
   dueDate: string | Date;
   subtotal: number;
   discount: number;
+  /** Factura electrónica simulada con IVA 19% (sin DIAN). */
+  electronic: boolean;
+  ivaAmount: number;
   total: number;
   totalPaid: number;
   balance: number;
@@ -170,6 +173,18 @@ function header(doc: Doc, invoice: InvoicePdfData) {
     .fontSize(11)
     .fillColor(BROWN_SOFT)
     .text(invoice.number, M, M + 39, { width: CW - 18, align: "right" });
+
+  // Sello de factura electrónica (simulada con IVA 19%, sin DIAN).
+  if (invoice.electronic) {
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .fillColor("#FFFFFF")
+      .text("ELECTRÓNICA · IVA 19%", M, M + 53, {
+        width: CW - 18,
+        align: "right",
+      });
+  }
 
   footer(doc);
 }
@@ -366,6 +381,9 @@ function totalsBox(doc: Doc, invoice: InvoicePdfData, y: number) {
   const rows: Row[] = [{ label: "Subtotal", value: money(invoice.subtotal) }];
   if (invoice.discount > 0) {
     rows.push({ label: "Descuento", value: `− ${money(invoice.discount)}` });
+  }
+  if (invoice.electronic && invoice.ivaAmount > 0) {
+    rows.push({ label: "IVA 19%", value: money(invoice.ivaAmount) });
   }
   rows.push({ label: "TOTAL", value: money(invoice.total), bold: true, rule: true });
 

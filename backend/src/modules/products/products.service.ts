@@ -16,6 +16,44 @@ import type {
 /** Roles que pueden ver el costo interno de producción (R7). */
 const COST_ROLES: Role[] = ["ADMIN", "CONTADOR"];
 
+function normalizeProductName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function editDistance(a: string, b: string) {
+  const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = row[0];
+    row[0] = i;
+
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = row[j];
+      row[j] = a[i - 1] === b[j - 1]
+        ? diagonal
+        : Math.min(diagonal, above, row[j - 1]) + 1;
+      diagonal = above;
+    }
+  }
+
+  return row[b.length];
+}
+
+function areSimilarProductNames(left: string, right: string) {
+  const a = normalizeProductName(left);
+  const b = normalizeProductName(right);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+
+  const longer = Math.max(a.length, b.length);
+  return editDistance(a, b) / longer <= 0.2;
+}
+
 export function serializePresentation(
   p: ProductPresentation,
   includeCost: boolean
@@ -105,6 +143,20 @@ export async function getById(id: string, role: Role) {
 }
 
 export async function create(input: CreateProductInput) {
+  const existingProducts = await prisma.product.findMany({
+    select: { name: true },
+  });
+  const similarProducts = existingProducts
+    .filter((product) => areSimilarProductNames(input.name, product.name))
+    .map((product) => product.name);
+
+  if (similarProducts.length > 0) {
+    throw ApiError.conflict(
+      `No se creó el producto porque el nombre es muy parecido a: ${similarProducts.join(", ")}.`,
+      similarProducts.map((name) => ({ path: "name", message: name }))
+    );
+  }
+
   const product = await prisma.product.create({
     data: {
       name: input.name,

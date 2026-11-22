@@ -29,7 +29,7 @@ const idParam = z.object({ id: z.string().uuid() });
  *     parameters:
  *       - { in: query, name: page, schema: { type: integer, default: 1 } }
  *       - { in: query, name: limit, schema: { type: integer, default: 20 } }
- *       - { in: query, name: category, schema: { type: string, enum: [Operativo, Nómina, Arriendo, Servicios públicos, Transporte, Empaque, Mantenimiento, Impuestos, Otro] } }
+ *       - { in: query, name: category, schema: { type: string, enum: [Operativo, Nómina, Arriendo, Servicios públicos, Transporte, Empaque, Materia prima, Mantenimiento, Impuestos, Otro] } }
  *       - { in: query, name: from, schema: { type: string, format: date } }
  *       - { in: query, name: to, schema: { type: string, format: date } }
  *       - { in: query, name: q, schema: { type: string }, description: Buscar por concepto }
@@ -102,7 +102,7 @@ router.get(
  *               date: { type: string, format: date, description: Hoy por defecto }
  *               concept: { type: string, example: Bolsas 250 g }
  *               amount: { type: number, example: 45000 }
- *               category: { type: string, enum: [Operativo, Nómina, Arriendo, Servicios públicos, Transporte, Empaque, Mantenimiento, Impuestos, Otro] }
+ *               category: { type: string, enum: [Operativo, Nómina, Arriendo, Servicios públicos, Transporte, Empaque, Materia prima, Mantenimiento, Impuestos, Otro] }
  *               notes: { type: string }
  *     responses:
  *       201: { description: Gasto registrado. }

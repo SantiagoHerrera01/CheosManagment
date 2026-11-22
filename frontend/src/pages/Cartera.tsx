@@ -63,6 +63,7 @@ export default function Cartera() {
     method: "ABONO" as PaymentMethod,
     notes: "",
   });
+  const [payFullDebt, setPayFullDebt] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
 
@@ -158,6 +159,7 @@ export default function Cartera() {
       method: "ABONO",
       notes: "",
     });
+    setPayFullDebt(false);
     setPayError(null);
   };
 
@@ -655,9 +657,14 @@ export default function Cartera() {
 
                   <Select
                     value={payForm.invoiceId}
-                    onChange={(value) =>
-                      setPayForm({ ...payForm, invoiceId: value })
-                    }
+                    onChange={(value) => {
+                      const invoice = accounts.find((a) => a.invoice.id === value)?.invoice;
+                      setPayForm({
+                        ...payForm,
+                        invoiceId: value,
+                        amount: payFullDebt && invoice ? String(invoice.balance) : "",
+                      });
+                    }}
                     aria-label="Factura"
                     options={accounts.map(({ invoice }) => ({
                       value: invoice.id,
@@ -690,6 +697,27 @@ export default function Cartera() {
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={payFullDebt}
+                  disabled={!payTarget && !payForm.invoiceId}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    const invoice = payTarget ?? accounts.find((a) => a.invoice.id === payForm.invoiceId)?.invoice;
+                    setPayFullDebt(checked);
+                    setPayForm((current) => ({
+                      ...current,
+                      amount: checked && invoice ? String(invoice.balance) : "",
+                    }));
+                  }}
+                  className="h-4 w-4 accent-[#6F4E37]"
+                />
+                <span className="text-sm font-medium text-stone-700">
+                  Pagar deuda completa
+                </span>
+              </label>
 
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-2">

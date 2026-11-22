@@ -6,6 +6,7 @@ import prisma from "../../shared/database/prisma.js";
 import { ApiError } from "../../shared/errors/api-error.js";
 import { signAccessToken } from "../../shared/utils/jwt.js";
 import { hashPassword, verifyPassword } from "../../shared/utils/password.js";
+import { DEFAULT_ROLE_PERMISSIONS } from "../../shared/auth/permissions.js";
 
 /** Refresh token opaco de 48 bytes; solo se guarda su hash SHA-256. */
 export function generateRefreshToken(): string {
@@ -17,12 +18,16 @@ export function hashRefreshToken(token: string): string {
 }
 
 /** Usuario sin campos sensibles (nunca sale `passwordHash` ni bloqueos). */
-export function toPublicUser(user: User) {
+export function toPublicUser(user: User & { roleDefinition?: { id: string; code: string; name: string; description: string | null; permissions: string[] } | null }) {
+  const dynamicRole = user.roleDefinition;
   return {
     id: user.id,
     email: user.email,
     fullName: user.fullName,
     role: user.role,
+    roleId: user.roleId,
+    roleName: dynamicRole?.name ?? user.role,
+    permissions: dynamicRole?.permissions ?? DEFAULT_ROLE_PERMISSIONS[user.role] ?? [],
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
@@ -61,7 +66,7 @@ function pruneExpiredTokens(userId: string): Promise<number> {
   }).then((r) => r.count);
 }
 
-async function issueSession(user: User, ctx: TokenContext): Promise<IssuedSession> {
+async function issueSession(user: User & { roleDefinition?: { id: string; code: string; name: string; description: string | null; permissions: string[] } | null }, ctx: TokenContext): Promise<IssuedSession> {
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email,
@@ -94,6 +99,7 @@ export async function login(
 ): Promise<IssuedSession> {
   const user = await prisma.user.findUnique({
     where: { email: email.trim().toLowerCase() },
+    include: { roleDefinition: true },
   });
 
   if (!user) {
@@ -134,6 +140,7 @@ export async function login(
   const updated = await prisma.user.update({
     where: { id: user.id },
     data: { failedLogins: 0, lockedUntil: null, lastLoginAt: now },
+    include: { roleDefinition: true },
   });
 
   // Higiene: elimina tokens vencidos del usuario
@@ -213,7 +220,8 @@ export async function refreshSession(
     role: stored.user.role,
   });
 
-  return { user: toPublicUser(stored.user), accessToken, refreshToken: newRefreshToken };
+  const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: stored.user.id }, include: { roleDefinition: true } });
+  return { user: toPublicUser(refreshedUser), accessToken, refreshToken: newRefreshToken };
 }
 
 // ============================================================

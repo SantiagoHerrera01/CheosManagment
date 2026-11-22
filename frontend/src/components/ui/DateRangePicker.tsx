@@ -116,6 +116,13 @@ export default function DateRangePicker({
 }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0, above: false });
+  /**
+   * En móvil el popover anclado no cabe en la pantalla: se renderiza como
+   * hoja inferior con fondo oscuro y scroll interno (mismo componente).
+   */
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+  );
   /** Mes visible del calendario. */
   const [month, setMonth] = useState(() =>
     value.from ? fromISO(value.from) : new Date()
@@ -130,6 +137,14 @@ export default function DateRangePicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Cambia entre popover anclado (PC) y hoja inferior (móvil) al redimensionar.
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)");
+    const onChange = () => setIsMobile(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
   /**
    * Recalcula la posición del menú anclada al botón. El portal usa
    * `position: fixed` (coords de viewport), así que hay que repintarlo en
@@ -137,6 +152,9 @@ export default function DateRangePicker({
    * página cuando la tabla se desplaza.
    */
   const updatePos = useCallback(() => {
+    // En móvil no hay ancla: el menú es una hoja inferior fija.
+    if (isMobile) return;
+
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -164,7 +182,7 @@ export default function DateRangePicker({
         ? current
         : next;
     });
-  }, []);
+  }, [isMobile]);
 
   // Posición inicial al abrir (useLayoutEffect = sin parpadeo) + seguimiento
   // del botón mientras esté abierto.
@@ -342,17 +360,31 @@ export default function DateRangePicker({
 
       {open &&
         createPortal(
-          <div
-            ref={menuRef}
-            data-popover
-            style={{
-              position: "fixed",
-              top: pos.top,
-              left: pos.left,
-              transformOrigin: pos.above ? "bottom" : "top",
-            }}
-            className="select-pop z-[60] w-[19rem] rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl shadow-stone-900/10"
-          >
+          <>
+            {/* Móvil: fondo oscuro; tocarlo cierra (clic fuera en document). */}
+            {isMobile && (
+              <div className="fixed inset-0 z-[60] bg-black/40" />
+            )}
+
+            <div
+              ref={menuRef}
+              data-popover
+              style={
+                isMobile
+                  ? undefined
+                  : {
+                      position: "fixed",
+                      top: pos.top,
+                      left: pos.left,
+                      transformOrigin: pos.above ? "bottom" : "top",
+                    }
+              }
+              className={
+                isMobile
+                  ? "fixed inset-x-4 bottom-4 z-[61] max-h-[80vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl"
+                  : "select-pop z-[60] w-[19rem] rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl shadow-stone-900/10"
+              }
+            >
             {/* RANGOS RÁPIDOS */}
             <div className="flex flex-wrap gap-1.5 pb-3 mb-3 border-b border-stone-100">
               {QUICK_RANGES.map((quick) => {
@@ -506,7 +538,8 @@ export default function DateRangePicker({
                 ? "Elige la fecha final del rango"
                 : "Elige la fecha inicial"}
             </p>
-          </div>,
+            </div>
+          </>,
           document.body
         )}
     </>

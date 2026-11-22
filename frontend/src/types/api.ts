@@ -12,9 +12,22 @@ export interface User {
   email: string;
   fullName: string;
   role: Role;
+  roleId?: string | null;
+  roleName?: string;
+  permissions?: string[];
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+}
+
+export interface RoleDefinition {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  isSystem: boolean;
+  _count?: { users: number };
 }
 
 export type DocumentType = "CC" | "NIT" | "CE" | "PASSPORT";
@@ -89,7 +102,6 @@ export type PaymentMethod =
   | "EFECTIVO"
   | "TRANSFERENCIA"
   | "CONTRA_ENTREGA"
-  | "CREDITO"
   | "ABONO";
 
 export type InvoiceStatus = "PENDIENTE" | "PAGADA" | "VENCIDA" | "ANULADA";
@@ -108,6 +120,8 @@ export interface InvoicePayment {
   id: string;
   amount: number;
   method: PaymentMethod;
+  /** Cuenta (Efectivo o banco) donde entró el dinero. */
+  account?: string | null;
   paidAt: string;
   notes: string | null;
 }
@@ -127,6 +141,9 @@ export interface Invoice {
   dueDate: string;
   subtotal: number;
   discount: number;
+  /** Factura electrónica simulada con IVA 19% (sin DIAN). */
+  electronic: boolean;
+  ivaAmount: number;
   total: number;
   totalPaid: number;
   balance: number;
@@ -149,8 +166,12 @@ export interface CreateInvoiceInput {
     wholesale?: boolean;
   }>;
   discount?: number;
+  /** Factura electrónica simulada: agrega IVA 19% sobre (subtotal − descuento). */
+  electronic?: boolean;
   paymentMethod: PaymentMethod;
   initialPayment?: number | null;
+  /** Cuenta (Efectivo o banco) donde entra el dinero; obligatoria con TRANSFERENCIA. */
+  accountId?: string | null;
   notes?: string | null;
   creditDays?: number;
 }
@@ -256,6 +277,7 @@ export type ExpenseCategory =
   | "Servicios públicos"
   | "Transporte"
   | "Empaque"
+  | "Materia prima"
   | "Mantenimiento"
   | "Impuestos"
   | "Otro";
@@ -267,6 +289,7 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   "Servicios públicos",
   "Transporte",
   "Empaque",
+  "Materia prima",
   "Mantenimiento",
   "Impuestos",
   "Otro",
@@ -324,6 +347,7 @@ export interface BankAccount {
   accountNumber: string | null;
   balance: number;
   isActive: boolean;
+  isSystem?: boolean;
   createdAt: string;
   updatedAt: string;
 }

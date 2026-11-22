@@ -10,7 +10,7 @@ import { toPublicUser } from "../auth/auth.service.js";
 import type { CreateUserInput, UpdateUserInput } from "./users.schemas.js";
 import type { Role } from "@prisma/client";
 
-export function serializeUser(user: User) {
+export function serializeUser(user: User & { roleDefinition?: { id: string; code: string; name: string; description: string | null; permissions: string[] } | null }) {
   return toPublicUser(user);
 }
 
@@ -35,6 +35,7 @@ export async function list(
   const [users, total] = await Promise.all([
     prisma.user.findMany({
       where,
+      include: { roleDefinition: true },
       orderBy: { fullName: "asc" },
       ...pageParams(pagination),
     }),
@@ -65,7 +66,8 @@ export async function create(input: CreateUserInput) {
     data: {
       email: input.email,
       fullName: input.fullName,
-      role: input.role,
+      role: input.role ?? "VENDEDOR",
+      ...(input.roleId ? { roleId: await ensureRole(input.roleId) } : {}),
       passwordHash: await hashPassword(input.password),
     },
   });
@@ -84,8 +86,8 @@ export async function update(id: string, input: UpdateUserInput, actor: AuthUser
   if (user.id === actor.id && input.isActive === false) {
     throw ApiError.badRequest("No puedes desactivar tu propia cuenta.");
   }
-  if (user.id === actor.id && input.role && input.role !== "ADMIN") {
-    throw ApiError.badRequest("No puedes cambiar tu propio rol de administrador.");
+  if (user.id === actor.id && input.roleId && input.roleId !== user.roleId) {
+    throw ApiError.badRequest("No puedes cambiar tu propio rol desde tu propia sesión.");
   }
 
   const updated = await prisma.user.update({
@@ -93,13 +95,21 @@ export async function update(id: string, input: UpdateUserInput, actor: AuthUser
     data: {
       ...(input.fullName !== undefined ? { fullName: input.fullName } : {}),
       ...(input.role !== undefined ? { role: input.role as Role } : {}),
+      ...(input.roleId !== undefined ? { roleId: await ensureRole(input.roleId) } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       // Al reactivar, desbloquea la cuenta
       ...(input.isActive === true ? { failedLogins: 0, lockedUntil: null } : {}),
     },
+    include: { roleDefinition: true },
   });
 
   return serializeUser(updated);
+}
+
+async function ensureRole(id: string) {
+  const role = await prisma.roleDefinition.findUnique({ where: { id } });
+  if (!role) throw ApiError.badRequest("El rol seleccionado no existe.");
+  return role.id;
 }
 
 /** Restablece la contraseña (admin) y cierra todas las sesiones del usuario. */

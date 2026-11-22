@@ -24,6 +24,8 @@ model User {
   fullName     String
   passwordHash String
   role         Role      @default(VENDEDOR)
+  roleId       String?
+  roleDefinition RoleDefinition? @relation(fields: [roleId], references: [id], onDelete: SetNull)
   isActive     Boolean   @default(true)
 
   // Protección contra fuerza bruta
@@ -43,6 +45,21 @@ model User {
   expenses         Expense[]         @relation("ExpenseCreatedBy")
   purchases        Purchase[]        @relation("PurchaseCreatedBy")
   bankMovements    BankMovement[]    @relation("BankMovementCreatedBy")
+}
+
+/// Roles configurables por el administrador. `permissions` contiene claves
+/// estables de permiso, no nombres de roles, para que el acceso sea extensible.
+model RoleDefinition {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  permissions String[]
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
 }
 
 /// Refresh tokens guardados hasheados (SHA-256): robar la BD no da sesiones vivas.
@@ -162,7 +179,6 @@ enum PaymentMethod {
   EFECTIVO
   TRANSFERENCIA
   CONTRA_ENTREGA
-  CREDITO
   ABONO
 }
 
@@ -186,6 +202,11 @@ model Invoice {
   subtotal Decimal @default(0)
   discount Decimal @default(0)
   total    Decimal @default(0)
+
+  /// Factura electrónica SIMULADA (sin DIAN): aplica IVA 19% sobre
+  /// (subtotal − descuento) y deja el monto registrado en `ivaAmount`.
+  electronic Boolean @default(false)
+  ivaAmount  Decimal @default(0)
 
   status        InvoiceStatus @default(PENDIENTE)
   paymentMethod PaymentMethod @default(EFECTIVO)
@@ -239,6 +260,10 @@ model Payment {
   method PaymentMethod
   paidAt DateTime      @default(now())
   notes  String?
+
+  /// Cuenta (Efectivo o banco) donde entró el dinero de este pago.
+  accountId String?
+  account   BankAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
 
   createdById String
   createdBy   User   @relation("PaymentCreatedBy", fields: [createdById], references: [id])
@@ -430,11 +455,15 @@ model BankAccount {
   accountNumber String?
   balance Decimal @default(0)
   isActive Boolean @default(true)
+  /// Cuenta automática del sistema ("Efectivo"): recibe los pagos en
+  /// efectivo de las ventas y abonos; no se puede desactivar.
+  isSystem Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   movements BankMovement[]
+  payments  Payment[]
 }
 
 model BankMovement {

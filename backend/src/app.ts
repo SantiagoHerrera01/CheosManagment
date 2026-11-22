@@ -25,6 +25,8 @@ import expensesRoutes from "./modules/expenses/expenses.routes.js";
 import purchasesRoutes from "./modules/purchases/purchases.routes.js";
 import banksRoutes from "./modules/banks/banks.routes.js";
 import reportsRoutes from "./modules/reports/reports.routes.js";
+import rolesRoutes from "./modules/roles/roles.routes.js";
+import { seedDefaults as seedRoleDefaults } from "./modules/roles/roles.service.js";
 
 const app = express();
 
@@ -91,6 +93,8 @@ app.get("/api", (req, res) => {
 // ------------------------------------------------------------
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
+app.use("/api/roles", rolesRoutes);
+void seedRoleDefaults().catch((error) => console.error("No se pudieron inicializar los roles:", error));
 app.use("/api/clients", clientsRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/invoices", invoicesRoutes);

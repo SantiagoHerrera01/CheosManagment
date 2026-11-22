@@ -9,6 +9,7 @@ export const expenseCategories = [
   "Servicios públicos",
   "Transporte",
   "Empaque",
+  "Materia prima",
   "Mantenimiento",
   "Impuestos",
   "Otro",

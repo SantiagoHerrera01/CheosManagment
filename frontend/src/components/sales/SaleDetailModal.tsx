@@ -511,6 +511,24 @@ export default function SaleDetailModal({
 
             </div>
 
+            {/* IVA (solo factura electrónica simulada) */}
+            {current.electronic && (
+              <div className="flex items-center justify-between mt-3">
+
+                <span className="text-stone-600">
+                  IVA 19%
+                  <span className="text-stone-400 text-xs ml-1.5">
+                    Factura electrónica
+                  </span>
+                </span>
+
+                <span className="font-medium text-stone-800">
+                  {formatCurrency(current.ivaAmount)}
+                </span>
+
+              </div>
+            )}
+
             <div className="flex items-center justify-between mt-3">
 
               <span className="text-stone-600">

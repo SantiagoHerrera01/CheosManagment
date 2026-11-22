@@ -121,9 +121,9 @@ const options: swaggerJsdoc.Options = {
         },
         MetodoPago: {
           type: "string",
-          enum: ["EFECTIVO", "TRANSFERENCIA", "CONTRA_ENTREGA", "CREDITO", "ABONO"],
+          enum: ["EFECTIVO", "TRANSFERENCIA", "CONTRA_ENTREGA", "ABONO"],
           description:
-            "EFECTIVO/TRANSFERENCIA/CONTRA_ENTREGA dejan la factura PAGADA. CREDITO la deja PENDIENTE a `creditDays` (30 por defecto). ABONO registra un abono inicial.",
+            "EFECTIVO/TRANSFERENCIA dejan la factura PAGADA. CONTRA_ENTREGA queda pendiente hasta registrar el pago. ABONO registra un abono inicial.",
         },
         GastoInput: {
           type: "object",

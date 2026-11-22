@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import {
   Briefcase,
+  Coffee,
   Home,
   Lightbulb,
   Loader2,
@@ -33,6 +34,7 @@ const CATEGORY_ICONS: Record<ExpenseCategory, typeof Receipt> = {
   "Servicios públicos": Lightbulb,
   Transporte: Truck,
   Empaque: Package,
+  "Materia prima": Coffee,
   Mantenimiento: Wrench,
   Impuestos: Receipt,
   Otro: Tag,
@@ -68,6 +70,7 @@ const CATEGORY_STYLES: Record<ExpenseCategory, string> = {
   "Servicios públicos": "bg-cyan-50 text-cyan-700",
   Transporte: "bg-amber-50 text-amber-700",
   Empaque: "bg-emerald-50 text-emerald-700",
+  "Materia prima": "bg-[#F3EDE7] text-[#6F4E37]",
   Mantenimiento: "bg-orange-50 text-orange-700",
   Impuestos: "bg-red-50 text-red-700",
   Otro: "bg-stone-100 text-stone-600",

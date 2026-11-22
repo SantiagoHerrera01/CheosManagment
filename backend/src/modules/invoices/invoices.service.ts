@@ -12,6 +12,7 @@ import { ApiError } from "../../shared/errors/api-error.js";
 import { signToken } from "../../shared/utils/share-token.js";
 import { money } from "../../shared/utils/money.js";
 import { pageParams, type Pagination } from "../../shared/utils/pagination.js";
+import * as banksService from "../banks/banks.service.js";
 import type {
   CreateInvoiceInput,
   CreatePaymentInput,
@@ -31,7 +32,7 @@ type InvoiceWithRelations = Invoice & {
   };
   createdBy: { id: string; fullName: string };
   items: InvoiceItem[];
-  payments: Payment[];
+  payments: (Payment & { account: { name: string } | null })[];
 };
 
 /** Saldo pendiente de una factura: total - abonos. */
@@ -54,6 +55,8 @@ export function serializeInvoice(invoice: InvoiceWithRelations, includeItems = t
     dueDate: invoice.dueDate,
     subtotal: money(invoice.subtotal),
     discount: money(invoice.discount),
+    electronic: invoice.electronic,
+    ivaAmount: money(invoice.ivaAmount),
     total: money(invoice.total),
     totalPaid: paid,
     balance: money(invoice.total) - paid,
@@ -76,6 +79,8 @@ export function serializeInvoice(invoice: InvoiceWithRelations, includeItems = t
       id: p.id,
       amount: money(p.amount),
       method: p.method,
+      /** Cuenta (Efectivo o banco) donde entró el dinero. */
+      account: p.account?.name ?? null,
       paidAt: p.paidAt,
       notes: p.notes,
     })),
@@ -132,8 +137,19 @@ export async function create(input: CreateInvoiceInput, userId: string) {
 
   const isPaidUpFront =
     input.paymentMethod === "EFECTIVO" ||
-    input.paymentMethod === "TRANSFERENCIA" ||
-    input.paymentMethod === "CONTRA_ENTREGA";
+    input.paymentMethod === "TRANSFERENCIA";
+
+  // Valida la cuenta destino ANTES de tocar la factura: TRANSFERENCIA
+  // exige cuenta elegida; el resto cae en "Efectivo" del sistema.
+  const payingNow =
+    isPaidUpFront || (input.initialPayment !== undefined && input.initialPayment !== null && input.initialPayment > 0);
+  const targetAccount = payingNow
+    ? await banksService.resolvePaymentAccount(
+        prisma,
+        input.paymentMethod,
+        input.accountId
+      )
+    : null;
 
   const result = await prisma.$transaction(async (tx) => {
     // Agrupa cantidades por presentación para validar stock
@@ -179,20 +195,23 @@ export async function create(input: CreateInvoiceInput, userId: string) {
     }
 
     const subtotal = lines.reduce((sum, l) => sum + l.subtotal, 0);
-    const total = Math.max(0, subtotal - input.discount);
+    const base = Math.max(0, subtotal - input.discount);
+    // IVA 19% solo en factura electrónica (simulada, sin DIAN):
+    // base = subtotal − descuento; total = base + IVA.
+    const ivaAmount = input.electronic ? Math.round(base * 0.19) : 0;
+    const total = base + ivaAmount;
 
     const number = await nextInvoiceNumber(tx);
 
     // Pago inicial o pago total inmediato (se calcula antes para poder
-    // validar el límite de crédito con lo que realmente queda a deber).
+    // validar el límite de cartera con lo que realmente queda a deber).
     const initialPayment = isPaidUpFront
       ? total
       : input.initialPayment && input.initialPayment > 0
         ? Math.min(input.initialPayment, total)
         : 0;
 
-    // Límite de crédito del cliente (bug 6 / R2): solo aplica a lo que
-    // queda a deber (crédito o abono). `creditLimit` en null = sin límite.
+    // Límite de cartera del cliente: solo aplica a lo que queda a deber.
     if (!isPaidUpFront && client.creditLimit !== null) {
       const creditLimit = money(client.creditLimit);
 
@@ -239,6 +258,8 @@ export async function create(input: CreateInvoiceInput, userId: string) {
         dueDate,
         subtotal,
         discount: input.discount,
+        electronic: input.electronic,
+        ivaAmount,
         total,
         paymentMethod: input.paymentMethod,
         status: isPaidUpFront ? "PAGADA" : "PENDIENTE",
@@ -274,15 +295,40 @@ export async function create(input: CreateInvoiceInput, userId: string) {
 
     // Pago inicial o pago total inmediato (ya calculado arriba)
     if (initialPayment > 0) {
+      const account =
+        targetAccount ??
+        (await banksService.resolvePaymentAccount(
+          tx,
+          input.paymentMethod,
+          input.accountId
+        ));
+
       await tx.payment.create({
         data: {
           invoiceId: invoice.id,
           amount: initialPayment,
           method: isPaidUpFront ? input.paymentMethod : "ABONO",
+          accountId: account.id,
           paidAt: issueDate,
           createdById: userId,
         },
       });
+
+      // El dinero entra a Bancos en la misma transacción de la venta:
+      // EFECTIVO/CONTRA_ENTREGA/ABONO al apartado Efectivo, y
+      // TRANSFERENCIA a la cuenta elegida.
+      await banksService.recordEntry(
+        tx,
+        account.id,
+        {
+          amount: initialPayment,
+          concept: isPaidUpFront
+            ? `Venta ${number} · ${client.fullName}`
+            : `Abono inicial venta ${number} · ${client.fullName}`,
+          date: issueDate,
+        },
+        userId
+      );
     }
 
     return invoice.id;
@@ -299,7 +345,10 @@ const baseInclude = {
   client: { select: { id: true, fullName: true, documentNumber: true, phone: true } },
   createdBy: { select: { id: true, fullName: true } },
   items: true,
-  payments: { orderBy: { paidAt: "asc" as const } },
+  payments: {
+    orderBy: { paidAt: "asc" as const },
+    include: { account: { select: { name: true } } },
+  },
 };
 
 /**
@@ -387,7 +436,10 @@ export async function registerPayment(
 ) {
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
-    include: { payments: true },
+    include: {
+      payments: true,
+      client: { select: { fullName: true } },
+    },
   });
   if (!invoice) throw ApiError.notFound("Factura no encontrada.");
   if (invoice.status === "ANULADA")
@@ -400,17 +452,37 @@ export async function registerPayment(
     );
   }
 
+  // Cuenta destino del abono: la elegida o "Efectivo" del sistema.
+  const account = await banksService.resolvePaymentAccount(
+    prisma,
+    input.method,
+    input.accountId
+  );
+
   const payment = await prisma.$transaction(async (tx) => {
     const created = await tx.payment.create({
       data: {
         invoiceId,
         amount: input.amount,
         method: input.method,
+        accountId: account.id,
         paidAt: input.paidAt ?? new Date(),
         notes: input.notes ?? null,
         createdById: userId,
       },
     });
+
+    // El abono entra a Bancos en la misma transacción.
+    await banksService.recordEntry(
+      tx,
+      account.id,
+      {
+        amount: input.amount,
+        concept: `Abono factura ${invoice.number} · ${invoice.client.fullName}`,
+        date: created.paidAt,
+      },
+      userId
+    );
 
     const remaining = currentBalance - input.amount;
     if (remaining <= 0.01) {

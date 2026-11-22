@@ -9,15 +9,11 @@ import {
   ShoppingBag,
   Receipt,
   BarChart3,
-  Settings,
-  UserCog,
-  Coffee,
 } from "lucide-react";
 
 import { NavLink } from "react-router-dom";
 
 import { useAuth } from "../context/auth-context";
-import { ROLE_LABELS, initials } from "../lib/roles";
 import type { Role } from "../types/api";
 
 interface MenuItem {
@@ -88,17 +84,6 @@ const menuItems: MenuItem[] = [
     icon: BarChart3,
     roles: ["CONTADOR"],
   },
-  {
-    name: "Configuración",
-    path: "/configuracion",
-    icon: Settings,
-  },
-  {
-    name: "Usuarios",
-    path: "/usuarios",
-    icon: UserCog,
-    roles: [],
-  },
 ];
 
 interface SidebarProps {
@@ -120,10 +105,8 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
     (item) => !item.roles || hasRole(...item.roles)
   );
 
-  const avatarInitials = initials(user.fullName);
-
   return (
-    <aside className="w-64 h-full min-h-screen bg-[#3E2924] text-white flex flex-col overflow-y-auto">
+    <aside className="w-64 h-full min-h-screen bg-[#6F4E37] text-white flex flex-col overflow-y-auto">
 
       {/* =========================================
           LOGO / NEGOCIO
@@ -133,8 +116,12 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
 
         <div className="flex items-center gap-3">
 
-          <div className="w-11 h-11 rounded-xl bg-[#6F4E37] flex items-center justify-center shrink-0">
-            <Coffee size={22} />
+          <div className="w-11 h-11 rounded-xl bg-[#8B5E3C] flex items-center justify-center shrink-0">
+            <img
+              src="/logo-cheos.png"
+              alt="Cheo's Café"
+              className="w-11 h-11 rounded-xl bg-white object-contain p-1"
+            />
           </div>
 
           <div>
@@ -183,8 +170,8 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
                   transition-all
                   ${
                     isActive
-                      ? "bg-[#6F4E37] text-white shadow-sm"
-                      : "text-white/75 hover:bg-white/10 hover:text-white"
+                      ? "bg-[#7A5238] text-white shadow-sm"
+                      : "text-white/90 hover:bg-white/15 hover:text-white"
                   }
                   `
                 }
@@ -208,34 +195,6 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
         </div>
 
       </nav>
-
-      {/* =========================================
-          PARTE INFERIOR: usuario (el logout vive en el header)
-      ========================================= */}
-
-      <div className="px-4 py-4 border-t border-white/10">
-
-        <div className="flex items-center gap-3 px-2">
-
-          <div className="w-9 h-9 rounded-full bg-[#6F4E37] flex items-center justify-center text-sm font-bold shrink-0">
-            {avatarInitials}
-          </div>
-
-          <div className="min-w-0 flex-1">
-
-            <p className="text-sm font-semibold truncate">
-              {user.fullName}
-            </p>
-
-            <p className="text-xs text-white/50">
-              {ROLE_LABELS[user.role]}
-            </p>
-
-          </div>
-
-        </div>
-
-      </div>
 
     </aside>
   );

@@ -1,7 +1,6 @@
 import {
   Banknote,
   Check,
-  CreditCard,
   Landmark,
   Loader2,
   MessageCircle,
@@ -32,6 +31,7 @@ import type {
   Invoice,
   Paginated,
   PaymentMethod,
+  BankAccount,
 } from "../../types/api";
 
 type NewSaleProps = {
@@ -39,34 +39,6 @@ type NewSaleProps = {
   /** Se llama después de crear la factura (para recargar la lista padre). */
   onSaleCreated?: () => void;
 };
-
-const bankAccounts = [
-  {
-    id: "111005",
-    name: "Bancolombia Cta Omar",
-    code: "111005",
-  },
-  {
-    id: "111006",
-    name: "Bancolombia Cta Cheo",
-    code: "111006",
-  },
-  {
-    id: "111007",
-    name: "Bancolombia Cta Emiliano",
-    code: "111007",
-  },
-  {
-    id: "111008",
-    name: "Nequi Gustavo",
-    code: "111008",
-  },
-  {
-    id: "111009",
-    name: "Cruce de Cuentas Migdo",
-    code: "111009",
-  },
-];
 
 /** Atajos de porcentaje de descuento en el resumen de la venta. */
 const DISCOUNT_SHORTCUTS = [5, 15, 30];
@@ -140,6 +112,7 @@ export default function NewSale({
     useState<PaymentMethod>("EFECTIVO");
 
   const [selectedBank, setSelectedBank] = useState("");
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
   const [discount, setDiscount] = useState("");
 
@@ -152,6 +125,12 @@ export default function NewSale({
 
   /** Input del descuento (el botón "Manual" lo enfoca). */
   const discountInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Factura electrónica (simulada, sin DIAN): al marcarla se agrega
+   * IVA 19% sobre (subtotal − descuento) al total de la venta.
+   */
+  const [electronic, setElectronic] = useState(false);
 
   const [receivedAmount, setReceivedAmount] = useState("");
 
@@ -203,6 +182,19 @@ export default function NewSale({
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
+
+  useEffect(() => {
+    api
+      .get<BankAccount[]>("/banks/accounts/options")
+      .then(setBankAccounts)
+      .catch((error: unknown) => {
+        setLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "No fue posible cargar las cuentas bancarias."
+        );
+      });
+  }, []);
 
   /**
    * Coincidencias del autocomplete. Con el campo vacío muestra los primeros
@@ -327,10 +319,13 @@ export default function NewSale({
     subtotal
   );
 
-  const total = Math.max(
-    subtotal - discountValue,
-    0
-  );
+  /** Base gravable: subtotal − descuento (nunca negativa). */
+  const ivaBase = Math.max(subtotal - discountValue, 0);
+
+  /** IVA 19% solo si es factura electrónica (simulada, sin DIAN). */
+  const ivaValue = electronic ? Math.round(ivaBase * 0.19) : 0;
+
+  const total = ivaBase + ivaValue;
 
   /**
    * Atajo de porcentaje: activa el modo porcentaje (el valor se deriva
@@ -411,11 +406,13 @@ export default function NewSale({
         wholesale: item.wholesale,
       })),
       discount: discountValue,
+      electronic,
       paymentMethod,
       initialPayment:
         paymentMethod === "ABONO"
           ? Number(receivedAmount || 0) || null
           : null,
+      accountId: selectedBank || null,
       creditDays: 30,
       notes: null,
     };
@@ -516,6 +513,29 @@ export default function NewSale({
               </span>
 
             </div>
+
+            {createdInvoice.electronic && (
+              <div
+                className="
+                  flex
+                  items-center
+                  justify-between
+                  gap-4
+                  px-4
+                  py-3
+                  border-b
+                  border-stone-100
+                "
+              >
+                <span className="text-sm text-stone-500">
+                  IVA 19%
+                </span>
+
+                <span className="text-sm font-semibold text-stone-800">
+                  {formatCurrency(createdInvoice.ivaAmount)}
+                </span>
+              </div>
+            )}
 
             <div
               className="
@@ -1296,6 +1316,61 @@ export default function NewSale({
 
           </div>
 
+          {/* FACTURA ELECTRÓNICA (IVA 19%) */}
+
+          <label
+            className="
+              flex
+              items-start
+              gap-3
+              rounded-xl
+              border
+              border-stone-200
+              bg-stone-50
+              px-4
+              py-3
+              cursor-pointer
+              hover:border-[#6F4E37]/40
+              transition
+            "
+          >
+            <input
+              type="checkbox"
+              checked={electronic}
+              onChange={(event) => setElectronic(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-[#6F4E37]"
+            />
+
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-stone-800">
+                Factura electrónica (IVA 19%)
+              </span>
+
+              <span className="block text-xs text-stone-500 mt-0.5">
+                Simulada: agrega el IVA sobre el subtotal menos el descuento.
+              </span>
+            </span>
+          </label>
+
+          {/* IVA (solo factura electrónica) */}
+
+          {electronic && (
+            <div className="flex items-center justify-between">
+
+              <span className="text-stone-600">
+                IVA 19%{" "}
+                <span className="text-stone-400 text-sm">
+                  sobre {formatCurrency(ivaBase)}
+                </span>
+              </span>
+
+              <span className="font-semibold text-stone-900">
+                {formatCurrency(ivaValue)}
+              </span>
+
+            </div>
+          )}
+
           {/* TOTAL */}
 
           <div
@@ -1375,7 +1450,7 @@ export default function NewSale({
 
           {/* MÉTODOS */}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
             {/* EFECTIVO */}
 
@@ -1490,44 +1565,6 @@ export default function NewSale({
 
             </button>
 
-            {/* CRÉDITO */}
-
-            <button
-              type="button"
-              onClick={() => {
-                setPaymentMethod("CREDITO");
-                setSelectedBank("");
-                setReceivedAmount("");
-              }}
-              className={`
-                rounded-xl
-                border
-                p-4
-                text-left
-                transition
-                ${
-                  paymentMethod === "CREDITO"
-                    ? "border-[#6F4E37] bg-[#FAF7F4]"
-                    : "border-stone-200 hover:bg-stone-50"
-                }
-              `}
-            >
-
-              <CreditCard
-                size={21}
-                className="text-[#6F4E37]"
-              />
-
-              <p className="font-semibold mt-3">
-                Crédito
-              </p>
-
-              <p className="text-xs text-stone-500 mt-1">
-                Pasa a cartera
-              </p>
-
-            </button>
-
             {/* ABONO */}
 
             <button
@@ -1595,9 +1632,9 @@ export default function NewSale({
                 }
                 placeholder="Seleccionar cuenta..."
                 aria-label="Cuenta bancaria"
-                options={bankAccounts.map((bank) => ({
+                options={bankAccounts.filter((bank) => !bank.isSystem).map((bank) => ({
                   value: bank.id,
-                  label: bank.name,
+                  label: `${bank.name} · ${bank.bank}`,
                   icon: Landmark,
                 }))}
               />
@@ -1780,49 +1817,6 @@ export default function NewSale({
                   </p>
 
                 </div>
-
-              </div>
-
-            </div>
-
-          )}
-
-          {/* =========================================
-              CRÉDITO
-          ========================================= */}
-
-          {paymentMethod === "CREDITO" && (
-
-            <div
-              className="
-                mt-5
-                rounded-xl
-                bg-amber-50
-                border
-                border-amber-200
-                p-5
-              "
-            >
-
-              <p className="font-semibold text-stone-900">
-                Venta a crédito
-              </p>
-
-              <p className="text-sm text-stone-600 mt-1">
-                El valor completo de esta venta quedará
-                pendiente y posteriormente aparecerá en
-                Cartera.
-              </p>
-
-              <div className="mt-4 flex items-center justify-between">
-
-                <span className="text-sm text-stone-600">
-                  Saldo a cartera
-                </span>
-
-                <span className="font-bold text-amber-700">
-                  {formatCurrency(total)}
-                </span>
 
               </div>
 

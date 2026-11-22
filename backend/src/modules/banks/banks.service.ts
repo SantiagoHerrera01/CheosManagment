@@ -1,4 +1,4 @@
-import type { BankAccount, BankMovement, Prisma } from "@prisma/client";
+import type { BankAccount, BankMovement, PaymentMethod, Prisma } from "@prisma/client";
 
 import prisma from "../../shared/database/prisma.js";
 import { ApiError } from "../../shared/errors/api-error.js";
@@ -19,6 +19,8 @@ export function serializeAccount(a: BankAccount) {
     accountNumber: a.accountNumber,
     balance: money(a.balance),
     isActive: a.isActive,
+    /** Cuenta automática del sistema ("Efectivo"). */
+    isSystem: a.isSystem,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
   };
@@ -48,6 +50,10 @@ export function serializeMovement(m: MovementWithRelations) {
 // ============================================================
 
 export async function listAccounts(includeInactive = false) {
+  // La caja de efectivo siempre existe y se muestra aunque todavía no haya
+  // registrado ventas.
+  await ensureSystemCashAccount();
+
   const accounts = await prisma.bankAccount.findMany({
     ...(includeInactive ? {} : { where: { isActive: true } }),
     orderBy: [{ isActive: "desc" }, { name: "asc" }],
@@ -71,6 +77,13 @@ export async function updateAccount(id: string, input: UpdateAccountInput) {
   const existing = await prisma.bankAccount.findUnique({ where: { id } });
   if (!existing) throw ApiError.notFound("Cuenta no encontrada.");
 
+  // La cuenta Efectivo del sistema es automática: no se puede desactivar.
+  if (existing.isSystem && input.isActive === false) {
+    throw ApiError.badRequest(
+      "La cuenta Efectivo es del sistema y no se puede desactivar."
+    );
+  }
+
   const account = await prisma.bankAccount.update({
     where: { id },
     data: {
@@ -89,6 +102,115 @@ export async function updateAccount(id: string, input: UpdateAccountInput) {
 // ============================================================
 //  MOVIMIENTOS — mantienen el saldo de la cuenta al día
 // ============================================================
+
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/**
+ * Cuenta "Efectivo" del sistema: se crea sola la primera vez que se
+ * necesita y recibe los pagos en efectivo de ventas y abonos.
+ */
+export async function ensureSystemCashAccount(
+  db: Db = prisma
+): Promise<BankAccount> {
+  const existing = await db.bankAccount.findFirst({
+    where: { isSystem: true },
+  });
+  if (existing) return existing;
+
+  return db.bankAccount.create({
+    data: {
+      name: "Efectivo",
+      bank: "Efectivo",
+      accountNumber: null,
+      isSystem: true,
+    },
+  });
+}
+
+/**
+ * Cuenta donde entra el dinero de un pago:
+ * - `accountId` explícito → esa cuenta (validada).
+ * - TRANSFERENCIA sin cuenta → error (hay que elegir dónde cae).
+ * - EFECTIVO / CONTRA_ENTREGA / ABONO → cuenta "Efectivo" del sistema.
+ */
+export async function resolvePaymentAccount(
+  db: Db,
+  method: PaymentMethod,
+  accountId?: string | null
+): Promise<BankAccount> {
+  if (accountId) {
+    const account = await db.bankAccount.findUnique({ where: { id: accountId } });
+    if (!account) throw ApiError.badRequest("La cuenta indicada no existe.");
+    if (!account.isActive)
+      throw ApiError.badRequest(`La cuenta "${account.name}" está inactiva.`);
+    return account;
+  }
+
+  if (method === "TRANSFERENCIA") {
+    throw ApiError.badRequest("Elige la cuenta donde se recibió la transferencia.");
+  }
+
+  return ensureSystemCashAccount(db);
+}
+
+/**
+ * Registra una ENTRADA de dinero en una cuenta y actualiza su saldo
+ * dentro de una transacción ya abierta (lo usan ventas y abonos para
+ * que el movimiento y la factura queden atómicos).
+ */
+export async function recordEntry(
+  tx: Prisma.TransactionClient,
+  accountId: string,
+  input: { amount: number; concept: string; date?: Date },
+  userId: string
+) {
+  const account = await tx.bankAccount.findUnique({ where: { id: accountId } });
+  if (!account) throw ApiError.badRequest("La cuenta del movimiento ya no existe.");
+  if (!account.isActive)
+    throw ApiError.badRequest(`La cuenta "${account.name}" está inactiva.`);
+
+  const amount = Math.abs(input.amount);
+
+  const movement = await tx.bankMovement.create({
+    data: {
+      accountId,
+      type: "ENTRADA",
+      amount,
+      concept: input.concept,
+      date: input.date ?? new Date(),
+      createdById: userId,
+    },
+    include: {
+      account: { select: { name: true } },
+      createdBy: { select: { id: true, fullName: true } },
+    },
+  });
+
+  await tx.bankAccount.update({
+    where: { id: accountId },
+    data: { balance: { increment: amount } },
+  });
+
+  return movement;
+}
+
+/** Listado ligero de cuentas activas para selectores (cualquier rol). */
+export async function listAccountOptions() {
+  await ensureSystemCashAccount();
+
+  return prisma.bankAccount.findMany({
+    where: { isActive: true },
+    orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      bank: true,
+      accountNumber: true,
+      isSystem: true,
+    },
+  });
+}
+
 
 export async function listMovements(pagination: Pagination, query: ListMovementsQuery) {
   const where: Prisma.BankMovementWhereInput = {

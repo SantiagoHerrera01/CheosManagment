@@ -29,7 +29,7 @@ import { ROLE_LABELS, initials } from "../lib/roles";
 import { useAuth } from "../context/auth-context";
 import Modal from "../components/ui/Modal";
 import Select from "../components/ui/Select";
-import type { Paginated, Role, User } from "../types/api";
+import type { Paginated, Role, RoleDefinition, User } from "../types/api";
 
 const ROLES: Role[] = ["ADMIN", "VENDEDOR", "BODEGA", "CONTADOR"];
 
@@ -83,6 +83,7 @@ export default function Users() {
   const { user: me } = useAuth();
 
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -91,7 +92,7 @@ export default function Users() {
 
   const [editing, setEditing] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
-  const [userRole, setUserRole] = useState<Role>("VENDEDOR");
+  const [userRole, setUserRole] = useState<string>("");
   const [resetTarget, setResetTarget] = useState<User | null>(null);
   const [toggleTarget, setToggleTarget] = useState<User | null>(null);
 
@@ -104,15 +105,17 @@ export default function Users() {
     setLoadError(null);
 
     try {
-      const result = await api.get<Paginated<User>>(
+      const [result, roleResult] = await Promise.all([api.get<Paginated<User>>(
         `/users${qs({
           q: search.trim(),
           includeInactive: "true",
           limit: 100,
         })}`
-      );
+      ), api.get<RoleDefinition[]>("/roles")]);
 
       setUsers(result.data);
+      setRoles(roleResult);
+      if (!userRole && roleResult[0]) setUserRole(roleResult.find((r) => r.code === "VENDEDOR")?.id ?? roleResult[0].id);
     } catch (error) {
       setLoadError(
         error instanceof ApiError
@@ -173,7 +176,6 @@ export default function Users() {
     const form = new FormData(event.currentTarget);
     const fullName = String(form.get("fullName") ?? "").trim();
     const email = String(form.get("email") ?? "").trim().toLowerCase();
-    const role = String(form.get("role") ?? "") as Role;
     const password = String(form.get("password") ?? "");
 
     if (fullName.length < 3) {
@@ -192,10 +194,10 @@ export default function Users() {
           return;
         }
 
-        await api.post("/users", { fullName, email, password, role });
+        await api.post("/users", { fullName, email, password, roleId: userRole });
         setFlash("Usuario creado correctamente.");
       } else if (editing) {
-        await api.patch(`/users/${editing.id}`, { fullName, role });
+        await api.patch(`/users/${editing.id}`, { fullName, roleId: userRole });
         setFlash("Usuario actualizado.");
       }
 
@@ -299,7 +301,7 @@ export default function Users() {
             setResetTarget(null);
             setToggleTarget(null);
             setFormError(null);
-            setUserRole("VENDEDOR");
+            setUserRole(roles.find((r) => r.code === "VENDEDOR")?.id ?? roles[0]?.id ?? "");
           }}
           className="
             inline-flex
@@ -492,7 +494,7 @@ export default function Users() {
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${ROLE_BADGES[account.role]}`}>
                         <ShieldCheck size={12} />
-                        {ROLE_LABELS[account.role]}
+                      {account.roleName ?? ROLE_LABELS[account.role] ?? account.role}
                       </span>
                     </td>
 
@@ -523,7 +525,7 @@ export default function Users() {
                             setResetTarget(null);
                             setToggleTarget(null);
                             setFormError(null);
-                            setUserRole(account.role);
+                            setUserRole(account.roleId ?? roles.find((r) => r.code === account.role)?.id ?? roles[0]?.id ?? "");
                           }}
                           title="Editar usuario"
                           className="p-2 rounded-lg text-stone-500 hover:text-[#6F4E37] hover:bg-stone-100 transition-colors"
@@ -663,13 +665,9 @@ export default function Users() {
 
               <Select
                 value={userRole}
-                onChange={(value) => setUserRole(value as Role)}
+                onChange={(value) => setUserRole(value)}
                 aria-label="Rol"
-                options={ROLES.map((role) => ({
-                  value: role,
-                  label: ROLE_LABELS[role],
-                  icon: ROLE_ICONS[role],
-                }))}
+                options={roles.map((role) => ({ value: role.id, label: role.name, icon: ShieldCheck }))}
               />
             </div>
 

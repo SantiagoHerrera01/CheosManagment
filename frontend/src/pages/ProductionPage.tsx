@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, qs } from "../lib/api";
-import { SIZE_OPTIONS } from "../lib/catalog";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
 import MoneyInput from "../components/ui/MoneyInput";
@@ -138,13 +137,16 @@ export default function ProductionPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // Mini-modal: alta rápida de materia prima desde el select (sin salir a Productos)
+  // Mini-modal: alta rápida de materia prima desde el select (sin salir a Productos).
+  // Formulario estandarizado: nombre + cantidad en kilos + valor total de la
+  // compra + proveedor (de ahí se deriva el costo por kilo). El alta crea el
+  // producto y registra la compra en Compras (no un gasto).
   const [rawCreateOpen, setRawCreateOpen] = useState(false);
   const [rawCreateForm, setRawCreateForm] = useState({
     name: "",
-    size: SIZE_OPTIONS[0] as string,
-    cost: "",
-    stock: "",
+    kilos: "",
+    total: "",
+    provider: "",
   });
   const [rawCreating, setRawCreating] = useState(false);
   const [rawCreateError, setRawCreateError] = useState<string | null>(null);
@@ -256,8 +258,9 @@ export default function ProductionPage() {
   }
 
   // ----------------------------------------------------------
-  //  Alta rápida de materia prima desde el select de la orden
-  //  (evita salir a Productos y volver a abrir todo)
+  //  Alta rápida de materia prima desde el select de la orden:
+  //  crea el producto (kilos en bodega) y registra la COMPRA en
+  //  Compras (nº C-xxxxxx, movimiento COMPRA y costo interno).
   // ----------------------------------------------------------
   async function handleCreateRaw(event: FormEvent) {
     event.preventDefault();
@@ -265,47 +268,81 @@ export default function ProductionPage() {
     setRawCreateError(null);
 
     const name = rawCreateForm.name.trim();
-    if (name.length < 2) {
-      setRawCreateError("Escribe el nombre de la materia prima (mínimo 2 letras).");
+    const kilos = Number(rawCreateForm.kilos);
+    const total = Number(rawCreateForm.total);
+    const provider = rawCreateForm.provider.trim();
+
+    if (name.length < 3) {
+      setRawCreateError("El nombre de la materia prima debe tener al menos 3 letras.");
+      return;
+    }
+    if (!Number.isInteger(kilos) || kilos <= 0) {
+      setRawCreateError("La cantidad debe ser un número entero de kilos mayor que cero.");
+      return;
+    }
+    if (!Number.isFinite(total) || total <= 0) {
+      setRawCreateError("Indica el valor total de la compra.");
       return;
     }
 
-    const cost = Number(rawCreateForm.cost) || 0;
-    const stock = Number(rawCreateForm.stock) || 0;
+    // Costo por kilo derivado del valor total del lote.
+    const costPerKg = Math.max(1, Math.round(total / kilos));
 
     setRawCreating(true);
 
     try {
+      // El stock lo ingresa la compra: el producto nace en cero.
       const created = await api.post<Product>("/products", {
         name,
         category: "MATERIA_PRIMA",
         presentations: [
           {
-            label: rawCreateForm.size,
+            label: "1 kg",
             grind: "GRANO",
             // La materia prima no entra a las ventas (filtran TERMINADO):
             // el precio solo existe para cumplir el esquema, manda el costo.
-            price: cost > 0 ? cost : 1,
-            cost,
-            stock,
+            price: costPerKg,
+            cost: costPerKg,
+            stock: 0,
             minimumStock: 0,
           },
         ],
       });
 
-      // Seleccionar la presentación creada en el select de la orden
       const createdPresentation =
         created.presentations.find(
-          (p) => p.label === rawCreateForm.size && p.isActive
+          (p) => p.label === "1 kg" && p.isActive
         ) ?? created.presentations[0];
 
+      // La compra se registra sola (entrada a bodega + movimiento COMPRA).
+      // Si falla, el material ya existe: se avisa para no duplicarlo.
+      try {
+        await api.post("/purchases", {
+          provider: provider || "Compra de materia prima",
+          notes: `${kilos} kg · alta desde Producción`,
+          items: [
+            {
+              presentationId: createdPresentation.id,
+              quantity: kilos,
+              unitCost: total / kilos,
+            },
+          ],
+        });
+      } catch {
+        setCreateError(
+          `La materia prima se creó, pero no se pudo registrar la compra. ` +
+            `Regístrala en Compras: $${total.toLocaleString("es-CO")} (${kilos} kg).`
+        );
+      }
+
+      // Seleccionar la presentación creada en el select de la orden
       setCreateForm((prev) => ({
         ...prev,
         rawMaterialPresentationId: createdPresentation.id,
       }));
 
       setRawCreateOpen(false);
-      setRawCreateForm({ name: "", size: SIZE_OPTIONS[0], cost: "", stock: "" });
+      setRawCreateForm({ name: "", kilos: "", total: "", provider: "" });
       await load(); // refresca rawOptions con la nueva materia prima
     } catch (error) {
       setRawCreateError(
@@ -753,7 +790,7 @@ export default function ProductionPage() {
                     "
                   >
                     <Plus size={14} />
-                    Nueva aquí
+                    Crear nueva
                   </button>
                 </div>
 
@@ -855,7 +892,7 @@ export default function ProductionPage() {
         <Modal
           icon={Plus}
           title="Nueva materia prima"
-          subtitle="Se creará con una presentación y quedará seleccionada en la orden."
+          subtitle="Registra el producto y su compra; el stock entra a bodega."
           onClose={() => setRawCreateOpen(false)}
           onSubmit={(event) => void handleCreateRaw(event)}
           size="md"
@@ -890,7 +927,7 @@ export default function ProductionPage() {
                 "
               >
                 {rawCreating && <Loader2 size={15} className="animate-spin" />}
-                {rawCreating ? "Creando…" : "Crear y seleccionar"}
+                {rawCreating ? "Creando…" : "Crear materia prima"}
               </button>
             </div>
           }
@@ -904,7 +941,7 @@ export default function ProductionPage() {
 
             <div>
               <label className="block text-sm font-medium text-stone-700 mb-2">
-                Nombre *
+                Nombre de la materia prima *
               </label>
 
               <input
@@ -913,7 +950,7 @@ export default function ProductionPage() {
                 onChange={(event) =>
                   setRawCreateForm({ ...rawCreateForm, name: event.target.value })
                 }
-                placeholder="Ej. Cenicafe 250"
+                placeholder="Ej. Café Caturra en grano"
                 autoFocus
                 className={inputClass}
               />
@@ -922,36 +959,33 @@ export default function ProductionPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Tamaño *
+                  Cantidad (kg) *
                 </label>
 
-                <Select
-                  value={rawCreateForm.size}
-                  onChange={(value) =>
-                    setRawCreateForm({ ...rawCreateForm, size: value })
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={rawCreateForm.kilos}
+                  onChange={(event) =>
+                    setRawCreateForm({ ...rawCreateForm, kilos: event.target.value })
                   }
-                  aria-label="Tamaño"
-                  options={SIZE_OPTIONS.map((size) => ({
-                    value: size,
-                    label: size,
-                    icon: Package,
-                  }))}
+                  placeholder="120"
+                  className={inputClass}
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Stock inicial
+                  Valor total de la compra *
                 </label>
 
-                <input
-                  type="number"
-                  min="0"
-                  value={rawCreateForm.stock}
-                  onChange={(event) =>
-                    setRawCreateForm({ ...rawCreateForm, stock: event.target.value })
+                <MoneyInput
+                  value={rawCreateForm.total}
+                  onChange={(raw) =>
+                    setRawCreateForm({ ...rawCreateForm, total: raw })
                   }
-                  placeholder="0"
+                  placeholder="2.000.000"
                   className={inputClass}
                 />
               </div>
@@ -959,22 +993,40 @@ export default function ProductionPage() {
 
             <div>
               <label className="block text-sm font-medium text-stone-700 mb-2">
-                Costo por kilo
+                Proveedor
               </label>
 
-              <MoneyInput
-                value={rawCreateForm.cost}
-                onChange={(raw) =>
-                  setRawCreateForm({ ...rawCreateForm, cost: raw })
+              <input
+                type="text"
+                value={rawCreateForm.provider}
+                onChange={(event) =>
+                  setRawCreateForm({ ...rawCreateForm, provider: event.target.value })
                 }
-                placeholder="Ej. 18.000"
+                placeholder="Ej. Eliseo Carvajal"
                 className={inputClass}
               />
 
-              <p className="text-xs text-stone-500 mt-2">
-                Es el costo interno de producción; nunca se muestra al cliente.
+              <p className="text-xs text-stone-400 mt-2">
+                Quién vendió el café. Si lo dejas vacío se registra como “Compra de materia prima”.
               </p>
             </div>
+
+            {Number(rawCreateForm.kilos) > 0 && Number(rawCreateForm.total) > 0 && (
+              <p className="text-xs text-stone-500 bg-stone-50 border border-stone-200 rounded-xl px-4 py-3">
+                Costo por kilo:{" "}
+                <span className="font-semibold text-stone-700">
+                  $
+                  {Math.round(
+                    Number(rawCreateForm.total) / Number(rawCreateForm.kilos)
+                  ).toLocaleString("es-CO")}
+                </span>{" "}
+                · Se registrará una compra de{" "}
+                <span className="font-semibold text-stone-700">
+                  ${Number(rawCreateForm.total).toLocaleString("es-CO")}
+                </span>{" "}
+                en Compras
+              </p>
+            )}
           </div>
         </Modal>
       )}

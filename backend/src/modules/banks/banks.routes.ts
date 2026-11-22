@@ -22,6 +22,29 @@ const idParam = z.object({ id: z.string().uuid() });
 
 /**
  * @openapi
+ * /banks/accounts/options:
+ *   get:
+ *     tags: [Bancos]
+ *     summary: Listado ligero de cuentas para selectores
+ *     description: |
+ *       Cuentas activas (Efectivo y bancos) sin saldo, para que
+ *       cualquier rol autenticado pueda elegir dónde cae un pago
+ *       al registrar una venta o un abono.
+ *     security: [{ cookieAuth: [] }]
+ *     responses:
+ *       200: { description: Id, nombre, banco y si es cuenta del sistema. }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get("/accounts/options", async (req, res, next) => {
+  try {
+    res.json({ data: await banksService.listAccountOptions() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
  * /banks/accounts:
  *   get:
  *     tags: [Bancos]

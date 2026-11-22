@@ -44,7 +44,6 @@ export interface Invoice {
   paymentMethod:
     | "CONTADO"
     | "TRANSFERENCIA"
-    | "CREDITO"
     | "BONO";
 
   status:

@@ -212,8 +212,8 @@ router.get(
  *     description: >
  *       Los precios se toman de la BD (nunca del cliente). Se valida stock,
  *       se descuenta inventario y se registra el movimiento de salida en la
- *       misma transacción. Con métodos de pago de contado queda PAGADA;
- *       con CREDITO queda PENDIENTE con vencimiento a `creditDays` (30 por defecto).
+ *       misma transacción. EFECTIVO y TRANSFERENCIA quedan PAGADA; una venta
+ *       con ABONO o CONTRA_ENTREGA queda pendiente hasta completar el pago.
  *     security: [{ cookieAuth: [] }]
  *     requestBody:
  *       required: true
@@ -234,8 +234,10 @@ router.get(
  *                     quantity: { type: integer, example: 2 }
  *                     wholesale: { type: boolean, default: false, description: Cobra el precio de mayoreo de la presentación si existe }
  *               discount: { type: number, description: Descuento en pesos }
+ *               electronic: { type: boolean, default: false, description: Factura electrónica simulada; agrega IVA 19% sobre (subtotal − descuento) }
  *               paymentMethod: { $ref: "#/components/schemas/MetodoPago" }
  *               initialPayment: { type: number, description: Abono inicial (método ABONO) }
+ *               accountId: { type: string, format: uuid, description: Cuenta (Efectivo o banco) donde entra el dinero; obligatoria con TRANSFERENCIA }
  *               creditDays: { type: integer, default: 30 }
  *               notes: { type: string }
  *     responses:
@@ -280,6 +282,7 @@ router.post(
  *             properties:
  *               amount: { type: number, example: 50000 }
  *               method: { $ref: "#/components/schemas/MetodoPago" }
+ *               accountId: { type: string, format: uuid, description: Cuenta (Efectivo o banco) donde entra el abono }
  *               paidAt: { type: string, format: date }
  *               notes: { type: string }
  *     responses:
